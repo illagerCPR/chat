@@ -9,3 +9,11 @@ build/
 .env.*
 !.env.example
 tmp/
+
+# 本地 AI 记忆库（含私人对话数据，误提交无法恢复）
+.dsh-meow/
+
+# 编辑器与工具
+.vscode/
+.idea/
+*.local
