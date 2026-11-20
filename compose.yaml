@@ -1,0 +1,26 @@
+# 自托管示例：一条命令起服务，对话数据存在 Docker 卷里
+#
+#   docker compose up -d
+#
+# 想直接看到数据文件，可改用宿主机目录挂载（记得先赋权给容器内的 node 用户 uid 1000）：
+#   mkdir -p ./data && sudo chown 1000:1000 ./data
+#   然后把 volumes 换成 "- ./data:/data"
+
+services:
+  chat:
+    image: ghcr.io/illagercpr/chat:latest
+    # 想从源码构建时注释掉 image，改用 build
+    # build: .
+    ports:
+      - '8080:3000'
+    environment:
+      # 设置后启用访问口令（HTTP Basic Auth），不设置则不做访问控制
+      # CHAT_PASSWORD: change-me
+      CHAT_USERNAME: chat
+      CHAT_DATA_DIR: /data
+    volumes:
+      - chat-data:/data
+    restart: unless-stopped
+
+volumes:
+  chat-data:
