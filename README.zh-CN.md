@@ -1,23 +1,72 @@
-# chat-demo
+# Aris Chat
 
 [English](README.md) | 简体中文
 
-基于 DeepSeek API 的静态聊天示例。无需应用后端，浏览器直接请求配置的 API 服务。
+基于 DeepSeek API 的聊天客户端。默认是纯静态页面：不需要应用后端，浏览器直接请求配置的 API 服务。自托管时还可以启动内置的存储服务，把对话数据保存在 Docker 数据卷里，重建容器或升级镜像都不会丢失。
 
-点击 [在线体验](https://deepseek-ai.github.io/chat-demo/) 即可使用，也可以前往 [Releases](https://github.com/deepseek-ai/deepseek-chat-demo/releases) 下载压缩包，解压后双击 `index.html` 在本地使用，无需安装或构建。首次使用时，请在设置中填写 API Key。
+点击 [在线体验](https://www.illageraris.dpdns.org/chat/) 即可使用；也可以把 `pnpm build` 的产物部署到任意静态服务器，或直接打开 `dist/index.html` 在本机使用。首次使用时，请在设置中填写 API Key。
 
-## 运行
+## 快速开始
 
-准备 Node.js 22.12+ 和 pnpm：
+### 方式一：静态页面
+
+把所有构建产物放到任意静态服务器即可，无需后端。对话保存在浏览器本地存储（IndexedDB）中，按浏览器用户配置和站点源隔离，换浏览器或清理站点数据后不可恢复；可以随时用设置里的导出做备份。
+
+### 方式二：Docker 自托管（对话存到数据卷）
 
 ```sh
-git clone https://github.com/deepseek-ai/chat-demo.git
-cd chat-demo
+docker run -d --name chat -p 8080:3000 -v chat-data:/data ghcr.io/illagercpr/chat:latest
+```
+
+打开 http://localhost:8080 。对话和附件保存在容器内的 `/data/chat.db`（SQLite），挂在 `chat-data` 卷上，重建容器、升级镜像都不会丢；同一实例的所有访问者共享同一份对话。
+
+也可以用仓库里的 [compose.yaml](compose.yaml)：
+
+```sh
+docker compose up -d
+```
+
+想直接在宿主机上看到数据文件，把 volumes 换成宿主机目录，并先给容器内的 `node` 用户（uid 1000）写权限：
+
+```sh
+mkdir -p ./data && sudo chown 1000:1000 ./data
+```
+
+| 环境变量           | 默认值 | 说明                                       |
+| ------------------ | ------ | ------------------------------------------ |
+| `PORT`             | `3000` | 监听端口                                   |
+| `CHAT_DATA_DIR`    | `/data` | 数据库所在目录                            |
+| `CHAT_PASSWORD`    | 空     | 设置后启用访问口令（HTTP Basic Auth）      |
+| `CHAT_USERNAME`    | `chat` | 口令对应的用户名                           |
+| `CHAT_MAX_FILE_MB` | `64`   | 单个附件原件的大小上限                     |
+| `CHAT_MAX_SESSION_MB` | `32` | 单个会话 JSON 的大小上限                   |
+
+口令只在反向代理提供 HTTPS 时才算安全，纯 HTTP 下凭据是明文传输的。
+
+备份与迁移：对话也可以随时在设置里导出为 ZIP，任何一份部署都能导入。直接备份数据卷：
+
+```sh
+docker run --rm -v chat-data:/data -v "$PWD":/backup alpine tar -czf /backup/chat-data.tgz -C /data .
+```
+
+### 方式三：本地开发
+
+前端构建需要 Node.js 22.12+ 和 pnpm；运行内置存储服务需要 Node.js 24+（用到内置 SQLite 与 TypeScript 类型剥离）。
+
+```sh
+git clone https://github.com/illagerCPR/chat.git
+cd chat
 pnpm install
 pnpm dev
 ```
 
-打开 http://localhost:8090 。
+打开 http://localhost:8090 。想同时用上服务端存储，另开一个终端：
+
+```sh
+pnpm dev:server
+```
+
+`pnpm dev` 会把 `/api` 代理到 `http://127.0.0.1:3000`，数据写到 `.data/chat.db`；服务没起时前端自动退回浏览器存储。
 
 生成静态产物：
 
@@ -25,7 +74,7 @@ pnpm dev
 pnpm build
 ```
 
-产物位于 `dist/`，可部署到静态服务器，也可直接打开 `dist/index.html`。直接打开时，浏览器和 API 服务需允许 `file://` 页面的存储与跨域请求。
+产物位于 `dist/`，可部署到静态服务器，也可直接打开 `dist/index.html`。直接打开时，浏览器需允许 `file://` 页面的本地存储。
 
 ## 功能
 
@@ -34,41 +83,52 @@ pnpm build
 - 附件上传、粘贴与拖拽，语音输入和回复朗读；移动端录音时输入框首行显示实时频谱。
 - Markdown、代码高亮、KaTeX 公式和 Mermaid 图表。
 - 简体中文与英文、浅色与深色主题、移动端布局、位置设置、历史导入导出。
+- 可选的服务器端存储：对话与附件持久化到 SQLite 数据卷，可选用访问口令。
 
 ## 数据
 
-API Key 和设置保存在浏览器 localStorage，会话及附件原件保存在 IndexedDB，本地数据按浏览器用户配置和站点源（origin）隔离。发送对话、上传附件和使用语音功能时，相应内容会提交给配置的 API 服务。
+API Key 和界面设置始终保存在浏览器 localStorage。对话数据按部署方式存放：
 
-设置中的历史导入导出使用 ZIP 格式。导入会在确认并校验成功后替换全部本地会话和附件；导出包含会话与本地可用的图片原件，不包含 API Key、设置或非图片附件原件。格式与保留范围见[历史导入导出](src/services/chat/history/README.md)。
+- 静态部署：会话与附件原件保存在浏览器 IndexedDB，按浏览器用户配置和站点源（origin）隔离。
+- Docker 自托管：会话与附件保存在服务端的 `/data/chat.db`，由数据卷持久化；浏览器只缓存当前页面里的状态，换浏览器或换设备访问同一实例能看到同一份对话。
 
-设置 → 数据管理 → 删除所有对话，会在确认后清空全部本地会话、附件原件和未发送的草稿，停止正在生成的回复并回到新对话。API Key 和其他设置保留，已上传到 API 服务的文件不受影响。
+两种方式下，发送消息、上传附件和使用语音功能都会把相应内容提交给配置的 API 服务。
+
+设置中的历史导入导出使用 ZIP 格式。导入会在确认并校验成功后替换全部会话和附件；导出包含会话与可用的图片原件，不包含 API Key、设置或非图片附件原件。格式与保留范围见[历史导入导出](src/services/chat/history/README.md)。
+
+设置 → 数据管理 → 删除所有对话，会在确认后清空全部会话、附件原件和未发送的草稿，停止正在生成的回复并回到新对话。API Key 和其他设置保留，已上传到 API 服务的文件不受影响；自托管部署下清理范围是服务器的数据库，数据卷里的数据库文件本身不会被删除。
 
 ## 开发
 
-| 命令          | 用途                |
-| ------------- | ------------------- |
-| `pnpm dev`    | 启动开发服务器      |
-| `pnpm build`  | 构建到 `dist/`      |
-| `pnpm type`   | TypeScript 类型检查 |
-| `pnpm lint`   | oxlint 检查         |
-| `pnpm format` | oxfmt 格式化        |
+| 命令             | 用途                        |
+| ---------------- | --------------------------- |
+| `pnpm dev`       | 启动开发服务器              |
+| `pnpm dev:server`| 启动内置存储服务（开发用）  |
+| `pnpm build`     | 构建到 `dist/`              |
+| `pnpm start`     | 运行构建产物与存储服务      |
+| `pnpm type`      | TypeScript 类型检查         |
+| `pnpm lint`      | oxlint 检查                 |
+| `pnpm format`    | oxfmt 格式化                |
 
 [rspack.config.ts](rspack.config.ts) 默认连接 `https://api.deepseek.com`。`createConfig({ apiOrigin, devServer })` 支持自定义 API 地址和开发服务器代理。
 
 聊天默认使用 `deepseek-flash`，通过 Anthropic 兼容的 Messages / Files API 通信；语音使用 ASR / TTS 接口。请求使用搜索、链接阅读、标题和 `latest_reminder` 等扩展，接入服务需支持相应能力。附件实际支持的格式以服务端校验为准。
 
 ```text
+server/               内置存储服务：静态资源 + 对话存储 API（实现见 server/README.md）
 src/
-  app/                 应用布局、主题与全局样式
-  components/          聊天、设置、Markdown 等界面组件
-  i18n/                中英文文案
+  app/                应用布局、主题与全局样式
+  components/         聊天、设置、Markdown 等界面组件
+  i18n/               中英文文案
   services/
-    api/               API 请求、SSE 与协议类型
-    chat/              会话、消息分支、本地存储与历史导入导出
-    markdown/          Markdown 解析、代码高亮与图表
-    speech/            录音与朗读
-  utils/               通用工具
+    api/              API 请求、SSE 与协议类型
+    chat/             会话、消息分支、存储实现与历史导入导出
+    markdown/         Markdown 解析、代码高亮与图表
+    speech/           录音与朗读
+  utils/              通用工具
 ```
+
+存储实现在 [src/services/chat/storage/](src/services/chat/storage/) 下：`indexeddb.ts` 是浏览器本地实现，`server.ts` 走内置存储服务，启动时探测同源是否存在 `/api/storage` 自动选择。
 
 ## 许可证
 
