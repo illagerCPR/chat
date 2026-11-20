@@ -119,8 +119,52 @@
 
 .bottom {
   display: flex;
+  flex-direction: column;
   flex-shrink: 0;
-  height: 64px;
+  gap: 2px;
+  padding-block: 4px 6px;
+}
+
+.balance {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.balance:hover {
+  background-color: var(--dsw-alias-bg-layer);
+}
+
+.balanceLabel {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.balanceValue {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-primary);
+}
+
+.balanceError .balanceValue {
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .settings {

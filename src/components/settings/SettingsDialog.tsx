@@ -17,6 +17,8 @@ import {
 } from '../../services/chat/backup.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { useChatStore } from '../../services/chat/store.js'
+import { refreshBalance, useBalance } from '../../services/balance.js'
+import { useBalanceStatus } from '../balance/useBalanceStatus.js'
 import { regionCodes, getRegionName, provinces } from '../../services/location.js'
 import {
   isChineseBrowser,
@@ -104,6 +106,7 @@ const SettingsContent = () => {
           ) : (
             <>
               <ApiKeyField editor={apiKeyEditor} />
+              <BalanceSetting />
               <ImportHistory historyImport={historyImport} disabled={historyBusy} />
               <ExportHistory disabled={historyBusy} />
               <SettingCell
@@ -408,12 +411,15 @@ const errorStatus = (key: TranslationKey, error: unknown): Status => ({
 const SettingCell = ({
   label,
   description,
+  descriptionError,
   status,
   action,
   className,
 }: {
   label: string
   description?: string
+  /** 描述文案本身是错误提示（余额查询失败等），按错误色展示 */
+  descriptionError?: boolean
   status: Status
   action: ReactNode
   className?: string
@@ -424,7 +430,12 @@ const SettingCell = ({
       <div className={styles.text}>
         <div className={styles.label}>{label}</div>
         {status || description ? (
-          <div className={clsx(styles.description, status?.error && styles.error)}>
+          <div
+            className={clsx(
+              styles.description,
+              (status?.error || descriptionError) && styles.error
+            )}
+          >
             {status
               ? t(status.key, status.reason ? { message: t(status.reason) } : status.params)
               : description}
@@ -433,6 +444,41 @@ const SettingCell = ({
       </div>
       {action}
     </div>
+  )
+}
+
+/** 账户余额：数值放操作区，赠金与充值明细放描述行；按钮重新查询。未填 API Key 时不展示。 */
+const BalanceSetting = () => {
+  const t = useTranslate()
+  const status = useBalanceStatus()
+  const loading = useBalance((state) => state.loading)
+  if (!status) {
+    return null
+  }
+  return (
+    <SettingCell
+      label={t('balanceLabel')}
+      description={status.placeholder ? status.text : status.detail}
+      descriptionError={status.error}
+      status={null}
+      action={
+        <div className={styles.balanceAction}>
+          {status.placeholder ? null : (
+            <span className={clsx(styles.balanceAmount, status.error && styles.balanceValueError)}>
+              {status.text}
+            </span>
+          )}
+          <Button
+            variant="outlined"
+            size="m"
+            disabled={loading}
+            onClick={() => void refreshBalance()}
+          >
+            {t('balanceRefresh')}
+          </Button>
+        </div>
+      }
+    />
   )
 }
 

@@ -9,6 +9,10 @@ declare const styles: {
   readonly "section": string;
   readonly "sectionHeader": string;
   readonly "bottom": string;
+  readonly "balance": string;
+  readonly "balanceLabel": string;
+  readonly "balanceValue": string;
+  readonly "balanceError": string;
   readonly "settings": string;
   readonly "settingsIcon": string;
   readonly "settingsLabel": string;

@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslate } from '../../i18n/index.js'
 import { IconPanelLeftOutline16, IconSettingsOutline16, NewChatIcon } from '../base/icons.js'
 import { setSiderCollapsed } from '../../services/settings.js'
+import { refreshBalance } from '../../services/balance.js'
+import { useBalanceStatus } from '../balance/useBalanceStatus.js'
 import { groupSessions } from '../../services/chat/sessionGroups.js'
 import { newChat, removeSession, useChatStore } from '../../services/chat/store.js'
 import type { SessionSummary } from '../../services/chat/types.js'
@@ -14,6 +16,26 @@ import { openSettings } from '../settings/settingsDialogState.js'
 import { closeMobileSider, useMobileSider } from './mobileSiderState.js'
 import { SessionItem } from './SessionItem.js'
 import styles from './Sider.module.css'
+
+/** 底部余额：显示账户可用余额，点击重新查询；未填写 API Key 时不渲染 */
+const BalanceBadge = () => {
+  const t = useTranslate()
+  const status = useBalanceStatus()
+  if (!status) {
+    return null
+  }
+  return (
+    <button
+      type="button"
+      className={clsx(styles.balance, status.error && styles.balanceError)}
+      title={status.detail ?? t('balanceRefresh')}
+      onClick={() => void refreshBalance()}
+    >
+      <span className={styles.balanceLabel}>{t('balanceLabel')}</span>
+      <span className={styles.balanceValue}>{status.text}</span>
+    </button>
+  )
+}
 
 /** 展开的侧边栏：名称与收起按钮、开启新对话、按时间分组的会话列表、底部设置；移动端放在抽屉里，收起按钮关闭抽屉 */
 export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
@@ -92,6 +114,7 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
         </div>
       </div>
       <div className={styles.bottom}>
+        <BalanceBadge />
         <button type="button" className={styles.settings} onClick={() => openSettings('general')}>
           <span className={styles.settingsIcon}>
             <IconSettingsOutline16 />

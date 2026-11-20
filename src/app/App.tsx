@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useTranslate } from '../i18n/index.js'
 import { useSettings } from '../services/settings.js'
+import { refreshBalance } from '../services/balance.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
 import {
   bindChatPersistence,
@@ -59,6 +60,12 @@ export const App = () => {
   // 文件数、存储空间达到上限时，附件上只显示「上传失败」，原因用 toast 说明
   useEffect(() => onUploadNotice(showToast), [])
   useEffect(bindChatPersistence, [])
+
+  // API Key 变化后重新查询余额；清空 Key 时余额区域随之隐藏
+  const apiKey = useSettings((state) => state.apiKey)
+  useEffect(() => {
+    void refreshBalance()
+  }, [apiKey])
 
   // 搜索结果面板只属于当前会话
   useEffect(closeSearchPanel, [activeId])
