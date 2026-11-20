@@ -25,7 +25,8 @@ type ConfigOptions = {
 
 /** 创建构建配置，支持自定义 API 地址和开发服务器选项 */
 export const createConfig = ({
-  apiOrigin = 'https://api.deepseek.com',
+  // 环境变量优先，供 CI 构建不同 API 环境的镜像
+  apiOrigin = process.env.API_ORIGIN || 'https://api.deepseek.com',
   devServer,
 }: ConfigOptions = {}): Configuration => ({
   mode: dev ? 'development' : 'production',
