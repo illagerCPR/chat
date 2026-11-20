@@ -17,3 +17,10 @@ tmp/
 .vscode/
 .idea/
 *.local
+
+# 自建存储服务的数据目录与数据库
+data/
+.data/
+*.db
+*.db-shm
+*.db-wal

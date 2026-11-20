@@ -18,3 +18,10 @@ build
 .env
 .env.*
 tmp
+
+# 本地运行存储服务时产生的数据，绝不进镜像
+data
+.data
+*.db
+*.db-shm
+*.db-wal

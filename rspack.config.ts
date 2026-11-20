@@ -91,7 +91,17 @@ export const createConfig = ({
     }),
   ],
   performance: { hints: false },
-  devServer: { port: 8090, ...devServer },
+  devServer: {
+    port: 8090,
+    // 开发时把存储 API 转发给本地服务；没起服务时前端会自动退回浏览器存储
+    proxy: [
+      {
+        context: ['/api'],
+        target: process.env.CHAT_API_SERVER || 'http://127.0.0.1:3000',
+      },
+    ],
+    ...devServer,
+  },
 })
 
 // eslint-disable-next-line import/no-default-export

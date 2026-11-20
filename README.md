@@ -1,23 +1,72 @@
-# chat-demo
+# Aris Chat
 
 English | [简体中文](README.zh-CN.md)
 
-A static chat demo powered by the DeepSeek API. No application backend is required: the browser connects directly to the configured API service.
+A chat client for the DeepSeek API. By default it is a static site with no application backend: the browser calls the configured API service directly. When self-hosting you can also run the bundled storage service, which keeps conversations in a Docker volume so they survive container rebuilds and image upgrades.
 
-You can [try the app online](https://deepseek-ai.github.io/chat-demo/) or download the archive from [Releases](https://github.com/deepseek-ai/deepseek-chat-demo/releases), extract it, and double-click `index.html` to use it locally without installation or a build. Enter your API key in Settings before your first chat.
+[Try it online](https://www.illageraris.dpdns.org/chat/), or serve the contents of `pnpm build` from any static host, or open `dist/index.html` locally. Enter your API key in Settings before your first chat.
 
 ## Getting started
 
-Install Node.js 22.12+ and pnpm, then run:
+### Option 1: static site
+
+Serve the build output from any static host; no backend is involved. Conversations live in the browser's IndexedDB, isolated by browser profile and site origin, so clearing site data or switching browsers loses them. Use the export in Settings to keep a backup.
+
+### Option 2: self-host with Docker (conversations in a data volume)
 
 ```sh
-git clone https://github.com/deepseek-ai/chat-demo.git
-cd chat-demo
+docker run -d --name chat -p 8080:3000 -v chat-data:/data ghcr.io/illagercpr/chat:latest
+```
+
+Open http://localhost:8080. Conversations and attachments are stored in `/data/chat.db` (SQLite) inside the container, backed by the `chat-data` volume, so they survive container rebuilds and image upgrades. Everyone who can reach the instance shares the same conversations.
+
+The [compose.yaml](compose.yaml) in this repository does the same thing:
+
+```sh
+docker compose up -d
+```
+
+To keep the data files visible on the host instead, point `volumes` at a host directory and give it to the container's `node` user (uid 1000) first:
+
+```sh
+mkdir -p ./data && sudo chown 1000:1000 ./data
+```
+
+| Variable              | Default | Description                                    |
+| --------------------- | ------- | ---------------------------------------------- |
+| `PORT`                | `3000`  | Listen port                                    |
+| `CHAT_DATA_DIR`       | `/data` | Directory holding the database                 |
+| `CHAT_PASSWORD`       | empty   | Enables HTTP Basic Auth when set               |
+| `CHAT_USERNAME`       | `chat`  | Username for Basic Auth                        |
+| `CHAT_MAX_FILE_MB`    | `64`    | Maximum stored attachment size                 |
+| `CHAT_MAX_SESSION_MB` | `32`    | Maximum session JSON size                      |
+
+Basic Auth is only safe behind an HTTPS reverse proxy; over plain HTTP the credentials travel in clear text.
+
+Backups: Settings can always export every conversation as a ZIP that any deployment can import. To back up the volume itself:
+
+```sh
+docker run --rm -v chat-data:/data -v "$PWD":/backup alpine tar -czf /backup/chat-data.tgz -C /data .
+```
+
+### Option 3: local development
+
+Building the frontend needs Node.js 22.12+ and pnpm; running the bundled storage service needs Node.js 24+ (it uses the built-in SQLite module and runs TypeScript directly).
+
+```sh
+git clone https://github.com/illagerCPR/chat.git
+cd chat
 pnpm install
 pnpm dev
 ```
 
-Open http://localhost:8090.
+Open http://localhost:8090. To use server-side storage as well, start it in another terminal:
+
+```sh
+pnpm dev:server
+```
+
+`pnpm dev` proxies `/api` to `http://127.0.0.1:3000` and data is written to `.data/chat.db`; when the service is not running the frontend falls back to browser storage automatically.
 
 To build the static site:
 
@@ -25,7 +74,7 @@ To build the static site:
 pnpm build
 ```
 
-The output is written to `dist/`. Deploy it to a static web server or open `dist/index.html` directly. Opening the file directly requires browser support for storage on `file://` pages and an API service that permits their cross-origin requests.
+The output is written to `dist/`. Deploy it to a static web server or open `dist/index.html` directly; opening the file directly requires browser support for local storage on `file://` pages.
 
 ## Features
 
@@ -34,41 +83,52 @@ The output is written to `dist/`. Deploy it to a static web server or open `dist
 - Upload, paste, or drag and drop attachments; use voice input and read replies aloud. A live audio spectrum appears in the first row of the input area while recording on mobile.
 - Markdown, syntax highlighting, KaTeX math, and Mermaid diagrams.
 - Simplified Chinese and English, light and dark themes, mobile layouts, location settings, and chat history import and export.
+- Optional server-side storage: conversations and attachments persist in a SQLite data volume, with optional password protection.
 
 ## Data and storage
 
-Your API key and settings are stored in the browser's localStorage. Conversations and original attachments are stored in IndexedDB. Local data is isolated by browser profile and site origin. Sending messages, uploading attachments, and using speech features sends the relevant content to the configured API service.
+Your API key and interface settings are always stored in the browser's localStorage. Where conversations live depends on how the app is deployed:
 
-History import and export in Settings use ZIP archives. After confirmation and successful validation, importing replaces all local conversations and attachments. Exports include conversations and locally available original images, but exclude API keys, settings, and original non-image attachments. See the [history import/export documentation (Chinese)](src/services/chat/history/README.md) for the archive format and preservation details.
+- Static site: conversations and original attachments are stored in the browser's IndexedDB, isolated by browser profile and site origin.
+- Self-hosted Docker: conversations and attachments are stored in `/data/chat.db` on the server and persisted by the data volume; the browser only keeps page state, so any browser or device that reaches the instance sees the same conversations.
 
-Settings → Data → Delete all chats clears all local conversations, original attachments, and unsent drafts after confirmation. It stops ongoing replies and returns to a new chat. Your API key and settings are preserved; files already uploaded to the API service are not deleted.
+In both cases, sending messages, uploading attachments, and using speech features send the relevant content to the configured API service.
+
+History import and export in Settings use ZIP archives. After confirmation and successful validation, importing replaces all conversations and attachments. Exports include conversations and locally available original images, but exclude API keys, settings, and original non-image attachments. See the [history import/export documentation (Chinese)](src/services/chat/history/README.md) for the archive format and preservation details.
+
+Settings → Data → Delete all chats clears all conversations, original attachments, and unsent drafts after confirmation. It stops ongoing replies and returns to a new chat. Your API key and settings are preserved; files already uploaded to the API service are not deleted. When self-hosting, this clears the server database rows, not the database file inside the volume.
 
 ## Development
 
-| Command       | Description                  |
-| ------------- | ---------------------------- |
-| `pnpm dev`    | Start the development server |
-| `pnpm build`  | Build into `dist/`           |
-| `pnpm type`   | Run TypeScript type checks   |
-| `pnpm lint`   | Lint with oxlint             |
-| `pnpm format` | Format with oxfmt            |
+| Command          | Description                          |
+| ---------------- | ------------------------------------ |
+| `pnpm dev`       | Start the development server         |
+| `pnpm dev:server`| Start the storage service (dev)      |
+| `pnpm build`     | Build into `dist/`                   |
+| `pnpm start`     | Run the build with the storage service |
+| `pnpm type`      | Run TypeScript type checks           |
+| `pnpm lint`      | Lint with oxlint                     |
+| `pnpm format`    | Format with oxfmt                    |
 
 [rspack.config.ts](rspack.config.ts) uses `https://api.deepseek.com` by default. Use `createConfig({ apiOrigin, devServer })` to customize the API origin and development server proxy.
 
 Chat uses `deepseek-flash` by default through Anthropic-compatible Messages / Files APIs. Speech features use ASR / TTS endpoints. Requests include extensions for search, link reading, titles, and `latest_reminder`, so the configured service must support the corresponding capabilities. Supported attachment formats are determined by server-side validation.
 
 ```text
+server/               Bundled storage service: static assets + conversation storage API
 src/
-  app/                 Application layout, themes, and global styles
-  components/          Chat, settings, Markdown, and other UI components
-  i18n/                English and Chinese translations
+  app/                Application layout, themes, and global styles
+  components/         Chat, settings, Markdown, and other UI components
+  i18n/               English and Chinese translations
   services/
-    api/               API requests, SSE, and protocol types
-    chat/              Conversations, message branches, storage, and history import/export
-    markdown/          Markdown parsing, syntax highlighting, and diagrams
-    speech/            Audio recording and read-aloud playback
-  utils/               Shared utilities
+    api/              API requests, SSE, and protocol types
+    chat/             Conversations, message branches, storage backends, history import/export
+    markdown/         Markdown parsing, syntax highlighting, and diagrams
+    speech/           Audio recording and read-aloud playback
+  utils/              Shared utilities
 ```
+
+Storage backends live in [src/services/chat/storage/](src/services/chat/storage/): `indexeddb.ts` is the browser implementation and `server.ts` talks to the bundled service. On startup the app probes `/api/storage` on the same origin and picks one automatically.
 
 ## License
 

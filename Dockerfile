@@ -20,12 +20,24 @@ ENV API_ORIGIN=$API_ORIGIN
 
 RUN pnpm build
 
-# ---- 运行阶段：只用 nginx 提供静态文件 ----
-FROM nginx:1.29-alpine AS runtime
+# ---- 运行阶段：单进程同时提供静态站点与对话存储 ----
+FROM node:24-alpine AS runtime
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+WORKDIR /app
 
-EXPOSE 80
+ENV NODE_ENV=production \
+    PORT=3000 \
+    CHAT_DATA_DIR=/data
 
-CMD ["nginx", "-g", "daemon off;"]
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/server ./server
+
+# 数据卷归 node 用户所有：命名卷会继承这里的属主，宿主机 bind mount 需自行 chown 1000:1000。
+# 顺手补齐读权限，避免在 umask 077 的机器上构建出 node 用户读不到的源码。
+RUN chmod -R a+rX ./dist ./server && mkdir -p /data && chown node:node /data
+USER node
+
+VOLUME ["/data"]
+EXPOSE 3000
+
+CMD ["node", "server/index.ts"]
