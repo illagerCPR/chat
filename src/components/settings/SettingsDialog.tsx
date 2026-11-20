@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   IconDarkOutline16,
   IconDataOutline16,
@@ -16,6 +16,7 @@ import {
   importHistory,
 } from '../../services/chat/backup.js'
 import { useIsMobile } from '../../app/viewport.js'
+import { getStorageInfo, type StorageInfo } from '../../services/chat/db.js'
 import { useChatStore } from '../../services/chat/store.js'
 import { refreshBalance, useBalance } from '../../services/balance.js'
 import { useBalanceStatus } from '../balance/useBalanceStatus.js'
@@ -105,6 +106,7 @@ const SettingsContent = () => {
             </>
           ) : (
             <>
+              <StorageSetting />
               <ApiKeyField editor={apiKeyEditor} />
               <BalanceSetting />
               <ImportHistory historyImport={historyImport} disabled={historyBusy} />
@@ -444,6 +446,44 @@ const SettingCell = ({
       </div>
       {action}
     </div>
+  )
+}
+
+/** 数据存放位置：静态部署在浏览器，自托管部署在服务器数据卷；探测完成后才显示说明。 */
+const StorageSetting = () => {
+  const t = useTranslate()
+  const [info, setInfo] = useState<StorageInfo | null>(null)
+
+  useEffect(() => {
+    let active = true
+    void getStorageInfo()
+      .then((value) => {
+        if (active) {
+          setInfo(value)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const description =
+    info === null
+      ? undefined
+      : info.mode === 'indexeddb'
+        ? t('storageLocationBrowser')
+        : info.dataDir
+          ? t('storageLocationServer', { path: info.dataDir })
+          : t('storageLocationServerFallback')
+
+  return (
+    <SettingCell
+      label={t('storageLocationLabel')}
+      description={description}
+      status={null}
+      action={null}
+    />
   )
 }
 
