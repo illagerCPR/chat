@@ -14,7 +14,8 @@ export type OpenAiContentPart =
   | { type: 'image_url'; image_url: { url: string } }
 
 export type OpenAiMessage = {
-  role: 'user' | 'assistant'
+  /** system 只用于注入官方检索结果，不承载固定人设 */
+  role: 'system' | 'user' | 'assistant'
   content: string | OpenAiContentPart[]
 }
 

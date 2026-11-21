@@ -83,6 +83,8 @@ export type ResolvedEndpoint = {
 }
 
 const STORAGE_KEY = 'chat-demo:providers'
+/** 存档结构版本：低于当前版本的存档在加载时做一次性迁移 */
+const STORAGE_SCHEMA = 3
 /** 0.2.x 把 API Key 单独存在这个键，升级后迁移进内置提供商 */
 const LEGACY_API_KEY = 'chat-demo:api-key'
 
@@ -94,7 +96,10 @@ const FULL_CAPABILITIES: ProviderCapabilities = {
   balance: true,
 }
 
-/** 自定义端点默认只开附件与深度思考：余额、语音、联网搜索多为 DeepSeek 专有 */
+/**
+ * 自定义端点默认只开附件与深度思考：联网搜索、语音与余额在 0.3.x 之前是 DeepSeek 专有，
+ * 现在虽然走官方通道，仍按需勾选，避免给不认识 server tools 的端点多发字段。
+ */
 const CUSTOM_CAPABILITIES: ProviderCapabilities = {
   files: true,
   thinking: true,
@@ -107,16 +112,20 @@ const CUSTOM_CAPABILITIES: ProviderCapabilities = {
  * 各形态真正支持的能力：
  * - DeepSeek 形态按扩展接口全开；
  * - Anthropic 形态没有 Files API（附件置灰），搜索改由官方检索预取实现；
- * - OpenAI 兼容协议只做聊天与图片内联。
- * 语音与余额始终走官方通道，是否可用还取决于官方 Key 是否存在，见 isCapabilitySupported。
+ * - OpenAI 兼容协议做聊天与图片内联，搜索同样改由官方检索预取实现。
+ * 语音与余额始终走官方通道，第三方端点上的搜索也由官方服务完成，是否可用还取决于
+ * 官方 Key 是否存在，见 isCapabilitySupported。
  */
 const SHAPE_CAPABILITIES: Record<ProviderShape, ProviderCapabilities> = {
   deepseek: FULL_CAPABILITIES,
   anthropic: { files: false, thinking: true, search: true, speech: true, balance: true },
-  openai: { files: true, thinking: true, search: false, speech: false, balance: false },
+  openai: { files: true, thinking: true, search: true, speech: true, balance: true },
 }
 
-/** 需要 DeepSeek 官方 Key 的能力：搜索（Anthropic 形态的预取）、语音、余额 */
+/**
+ * 需要 DeepSeek 官方 Key 的能力：搜索（第三方端点的预取）、语音、余额。
+ * 只有 DeepSeek 形态的搜索由端点自己执行（server tools），不需要官方 Key。
+ */
 const OFFICIAL_CAPABILITIES: (keyof ProviderCapabilities)[] = ['search', 'speech', 'balance']
 
 const readStorage = (key: string) => {
@@ -203,20 +212,44 @@ const withBuiltin = (providers: Provider[], legacyKey: string): Provider[] => {
     : providers
 }
 
+/**
+ * 0.3.2 及更早版本的 OpenAI 兼容端点不支持联网搜索、语音与余额：设置页把这三项置灰，
+ * 存档里的 false 并不是用户的选择。升级到 0.3.3 时按协议一次性打开，用户之后再关掉不会复原。
+ */
+const migrateOpenAiCapabilities = (providers: Provider[]): Provider[] =>
+  providers.map((provider) =>
+    provider.protocol === 'openai'
+      ? {
+          ...provider,
+          capabilities: {
+            ...provider.capabilities,
+            search: true,
+            speech: true,
+            balance: true,
+          },
+        }
+      : provider
+  )
+
 const readState = (): ProvidersState => {
   const legacyKey = readStorage(LEGACY_API_KEY) ?? ''
   let providers: Provider[] = []
   let activeId: string | null = null
   let officialApiKey = ''
+  let schema = 0
   try {
     const stored: unknown = JSON.parse(readStorage(STORAGE_KEY) ?? 'null')
     if (isRecord(stored) && Array.isArray(stored.providers)) {
       providers = stored.providers.flatMap((item) => readProvider(item) ?? [])
       activeId = typeof stored.activeId === 'string' ? stored.activeId : null
       officialApiKey = typeof stored.officialApiKey === 'string' ? stored.officialApiKey : ''
+      schema = typeof stored.schema === 'number' ? stored.schema : 0
     }
   } catch {
     // 存档损坏时回到只有内置提供商的初始状态
+  }
+  if (schema < STORAGE_SCHEMA) {
+    providers = migrateOpenAiCapabilities(providers)
   }
   providers = withBuiltin(providers, legacyKey)
   return {
@@ -231,8 +264,11 @@ const readState = (): ProvidersState => {
 export const useProviders = create<ProvidersState>(readState)
 
 const persist = () => {
-  const { providers, activeId } = useProviders.getState()
-  writeStorage(STORAGE_KEY, JSON.stringify({ providers, activeId }))
+  const { providers, activeId, officialApiKey } = useProviders.getState()
+  writeStorage(
+    STORAGE_KEY,
+    JSON.stringify({ schema: STORAGE_SCHEMA, providers, activeId, officialApiKey })
+  )
 }
 
 const commit = (next: Partial<ProvidersState>) => {
@@ -260,7 +296,7 @@ export const useActiveProvider = (): Provider =>
 
 /**
  * 按形态收窄后的能力：存档里的勾选值再与形态支持的能力取交集，
- * 需要官方 Key 的能力（Anthropic 形态的搜索、语音、余额）额外要求官方 Key 存在。
+ * 需要官方 Key 的能力（第三方端点上的搜索、语音、余额）额外要求官方 Key 存在。
  */
 export const getCapabilities = (provider: Provider): ProviderCapabilities => ({
   files: provider.capabilities.files && isCapabilitySupported(provider, 'files'),
@@ -334,9 +370,24 @@ export const updateProvider = (id: string, patch: ProviderPatch) => {
         }
       : patch
   commit({
-    providers: useProviders
-      .getState()
-      .providers.map((provider) => (provider.id === id ? { ...provider, ...next } : provider)),
+    providers: useProviders.getState().providers.map((provider) => {
+      if (provider.id !== id) {
+        return provider
+      }
+      const merged = { ...provider, ...next }
+      // 从官方端点换成第三方端点：语音、余额与检索本来就走官方通道，默认打开，用户可再关掉
+      if (
+        next.capabilities === undefined &&
+        getProviderShape(provider) === 'deepseek' &&
+        getProviderShape(merged) !== 'deepseek'
+      ) {
+        return {
+          ...merged,
+          capabilities: { ...merged.capabilities, search: true, speech: true, balance: true },
+        }
+      }
+      return merged
+    }),
   })
 }
 

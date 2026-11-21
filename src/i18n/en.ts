@@ -221,7 +221,7 @@ export const en = {
   providerProtocolDeepseek: 'DeepSeek compatible',
   providerProtocolOpenai: 'OpenAI compatible',
   providerProtocolHint:
-    'DeepSeek-compatible URLs are detected by shape: a site root or a path containing /anthropic uses the DeepSeek extensions, while a versioned path such as /v1 uses the standard Anthropic Messages API. OpenAI compatibility uses /v1/chat/completions and covers chat plus inline images only. The built-in provider always uses the DeepSeek protocol.',
+    'DeepSeek-compatible URLs are detected by shape: a site root or a path containing /anthropic uses the DeepSeek extensions, while a versioned path such as /v1 uses the standard Anthropic Messages API. OpenAI compatibility uses /v1/chat/completions and covers chat plus inline images. On third-party endpoints smart search runs one official retrieval first and injects the result, and voice plus balance always use the official service. The built-in provider always uses the DeepSeek protocol.',
   providerEndpointHint:
     'Enter a site root (the /anthropic/v1 prefix is appended) or paste the full /messages endpoint. The endpoint must allow cross-origin requests, and an HTTPS page cannot call http:// addresses.',
   providerEndpointHintAnthropic:

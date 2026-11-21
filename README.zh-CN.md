@@ -84,7 +84,7 @@ pnpm build
 - Markdown、代码高亮、KaTeX 公式和 Mermaid 图表。
 - 简体中文与英文、浅色与深色主题、移动端布局、位置设置、历史导入导出。
 - 可选的服务器端存储：对话与附件持久化到 SQLite 数据卷，可选用访问口令。
-- 自定义提供商：可指向 DeepSeek 兼容、标准 Anthropic Messages 或 OpenAI 兼容端点，每条配置有自己的 Key、模型与能力开关；联网搜索、语音与余额固定使用 DeepSeek 官方服务。
+- 自定义提供商：可指向 DeepSeek 兼容、标准 Anthropic Messages 或 OpenAI 兼容端点，每条配置有自己的 Key、模型与能力开关；联网搜索、语音与余额固定使用 DeepSeek 官方服务，因此第三方端点上也能用这三项。
 
 ## 提供商
 
@@ -93,7 +93,7 @@ pnpm build
 - **DeepSeek 兼容**：按地址自动识别是哪一种 Anthropic 兼容接口，设置页地址下方会显示实际请求地址。
   - 站点根地址或带 `/anthropic` 的地址（如 `https://api.deepseek.com`、`…/anthropic/v1`）：按 DeepSeek 的扩展接口调用，支持附件，联网搜索与链接阅读由端点自己用 DeepSeek 的 server tools 完成。
   - 带版本段的地址（如 `https://api.example.com/provider/v1`）或直接粘贴的整条端点（`…/v1/messages`、`…/v1/message`）：按标准 Anthropic Messages API 调用，附件不可用，联网搜索改由官方检索完成（见下文）。
-- **OpenAI 兼容**：`POST /v1/chat/completions`，流式返回。地址填根地址或 `/v1` 地址均可，客户端会自动补全 `/v1/chat/completions`。只支持聊天：图片以 data URL 内联发送，端点返回的思考内容（`reasoning_content` 或 `reasoning`）会正常展示，联网搜索、语音与余额不可用；PDF、Word 这类文档附件无法通过该协议发送。「获取模型列表」会用 `GET /v1/models` 填充模型 ID。
+- **OpenAI 兼容**：`POST /v1/chat/completions`，流式返回。地址填根地址或 `/v1` 地址均可，客户端会自动补全 `/v1/chat/completions`。聊天与图片内联都支持：图片以 data URL 发送，端点返回的思考内容（`reasoning_content` 或 `reasoning`）会正常展示。联网搜索由官方检索完成，结果作为首条 `system` 消息注入；语音与余额同样使用官方服务（见下文）。PDF、Word 这类文档附件无法通过该协议发送。「获取模型列表」会用 `GET /v1/models` 填充模型 ID。
 
 每条提供商有独立的地址、API Key、模型 ID，以及附件、深度思考、联网搜索、语音、余额五个能力开关。只有开启的能力会出现在界面上，未开启的能力不会写进请求体，因此只实现了部分接口的端点也能正常聊天。
 
@@ -101,7 +101,9 @@ pnpm build
 
 联网搜索、语音（语音输入与朗读）和余额查询由 DeepSeek 官方服务提供，与当前选中的提供商无关——正和第三方模型聊天时，这三项仍然请求 `api.deepseek.com`，使用设置底部的「官方能力 Key」。留空即沿用内置 DeepSeek 的 Key；两者都没有时，这三项在设置里置灰，输入区也不会显示对应按钮。
 
-标准 Anthropic 形态端点上的联网搜索是这样实现的：先用官方 Key 做一次检索，把结果整理成上下文附给主请求，界面上照常显示来源卡片。检索失败不会中断回答，只会提示本次没有用上检索结果。只有 DeepSeek 结构端点（官方本身或转发到官方的反代）才由端点执行搜索。
+第三方端点（标准 Anthropic 与 OpenAI 兼容）上的联网搜索是这样实现的：先用官方 Key 做一次检索，把结果整理成上下文附给主请求——标准 Anthropic 形态注入 `system` 字段，OpenAI 形态作为首条 `system` 消息——界面上照常显示来源卡片。检索失败不会中断回答，只会提示本次没有用上检索结果。只有 DeepSeek 结构端点（官方本身或转发到官方的反代）才由端点执行搜索。
+
+把提供商改成第三方端点时，联网搜索、语音与余额三个开关会自动打开，也可以在设置里单独关掉。
 
 会话标题由 DeepSeek 接口生成，非 DeepSeek 结构端点上的对话会一直显示「新对话」，直到你手动改名。
 

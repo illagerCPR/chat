@@ -212,7 +212,7 @@ export const zh = {
   providerProtocolDeepseek: 'DeepSeek 兼容',
   providerProtocolOpenai: 'OpenAI 兼容',
   providerProtocolHint:
-    'DeepSeek 兼容的地址会按形态识别：站点根地址与带 /anthropic 的地址按 DeepSeek 扩展接口调用，/v1 等带版本段的地址按标准 Anthropic Messages API 调用。OpenAI 兼容走 /v1/chat/completions，只支持聊天与图片内联。内置提供商固定使用 DeepSeek 协议。',
+    'DeepSeek 兼容的地址会按形态识别：站点根地址与带 /anthropic 的地址按 DeepSeek 扩展接口调用，/v1 等带版本段的地址按标准 Anthropic Messages API 调用。OpenAI 兼容走 /v1/chat/completions，支持聊天与图片内联。第三方端点上的智能搜索会先用官方 Key 检索一次再注入结果，语音与余额固定使用官方服务。内置提供商固定使用 DeepSeek 协议。',
   providerEndpointHint:
     '可填站点根地址（自动补 /anthropic/v1），也可直接粘贴整条 /messages 端点；端点需允许跨域，HTTPS 页面不能直连 http:// 地址。',
   providerEndpointHintAnthropic:

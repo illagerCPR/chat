@@ -248,7 +248,7 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
           })}
         </div>
         <div className={styles.description}>{t('providerCapabilitiesHint')}</div>
-        {shape !== 'openai' && !officialReady ? (
+        {!officialReady ? (
           <div className={styles.description}>{t('providerCapabilitiesOfficialHint')}</div>
         ) : null}
       </div>

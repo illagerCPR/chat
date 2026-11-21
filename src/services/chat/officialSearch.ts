@@ -11,8 +11,9 @@ import { applyEvent } from './reply.js'
 import type { AssistantMessage, ReplyBlock } from './types.js'
 
 /**
- * 标准 Anthropic 形态端点上的联网搜索：搜索工具只存在于 DeepSeek 服务端，
- * 第三方端点无法调用，所以先用官方 Key 打一次官方检索，再把结果注入主请求。
+ * 第三方端点（标准 Anthropic 与 OpenAI 兼容）上的联网搜索：搜索工具只存在于 DeepSeek 服务端，
+ * 第三方端点无法调用，所以先用官方 Key 打一次官方检索，再把结果注入主请求
+ * （Anthropic 形态注入 system 字段，OpenAI 形态注入首条 system 消息）。
  * 检索失败不影响主请求：调用方按「没搜到」继续，只弹一条轻提示。
  */
 

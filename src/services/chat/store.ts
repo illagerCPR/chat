@@ -1051,6 +1051,35 @@ const waitForRetry = (attempt: number, signal: AbortSignal) =>
   })
 
 /**
+ * 官方检索预取：第三方端点不能执行 DeepSeek 的服务端搜索工具，所以先用官方 Key 检索一次。
+ * 来源块挂到回复顶部照常展示，摘要交给调用方注入主请求；检索失败只弹轻提示，不拖垮回答。
+ */
+const runSearchPrepass = async (
+  sessionId: string,
+  reply: AssistantMessage,
+  question: UserMessage,
+  signal: AbortSignal
+): Promise<{ reply: AssistantMessage; context: string | undefined }> => {
+  try {
+    const result = await runOfficialSearch(question.content, signal)
+    if (!result) {
+      return { reply, context: undefined }
+    }
+    // 检索块排在最前，界面上先看到来源再看到正文
+    const next = { ...reply, blocks: [...result.blocks, ...reply.blocks] }
+    updateReply(sessionId, next)
+    persist(sessionId)
+    return { reply: next, context: result.context }
+  } catch (error) {
+    if (signal.aborted) {
+      throw error
+    }
+    notifyOfficialSearchFailed()
+    return { reply, context: undefined }
+  }
+}
+
+/**
  * 请求并消费流：先补齐附件的 serverId，再发请求；流式增量按动画帧刷新内存，完成、失败或停止后落盘。
  * 补传失败时回复记为 upload 错误，可重试。
  * 服务端判定 file_id 失效时重新补传后重发，退避重试且次数有上限，超过则按原始报错收尾。
@@ -1093,9 +1122,21 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         const shape = getProviderShape(provider)
         let events: AsyncGenerator<MessageStreamEvent>
         if (shape === 'openai') {
+          // 与 Anthropic 形态一致：搜索只在开启时预取一次，重试复用已有结果
+          if (initial.search && !searched) {
+            searched = true
+            const prepass = await runSearchPrepass(
+              sessionId,
+              reply,
+              prepared.question,
+              controller.signal
+            )
+            reply = prepass.reply
+            searchContext = prepass.context
+          }
           const body = await createOpenAiRequest(
             provider,
-            { history: prepared.history, question: prepared.question },
+            { history: prepared.history, question: prepared.question, context: searchContext },
             loadAttachmentBlob(sessionId),
             controller.signal
           )
@@ -1107,22 +1148,14 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
           }
           if (initial.search && !searched) {
             searched = true
-            try {
-              const result = await runOfficialSearch(prepared.question.content, controller.signal)
-              if (result) {
-                // 检索块排在最前，界面上先看到来源再看到正文
-                reply = { ...reply, blocks: [...result.blocks, ...reply.blocks] }
-                searchContext = result.context
-                updateReply(sessionId, reply)
-                persist(sessionId)
-              }
-            } catch (error) {
-              // 检索失败不拖垮主请求：按没搜到继续，另用轻提示说明
-              if (controller.signal.aborted) {
-                throw error
-              }
-              notifyOfficialSearchFailed()
-            }
+            const prepass = await runSearchPrepass(
+              sessionId,
+              reply,
+              prepared.question,
+              controller.signal
+            )
+            reply = prepass.reply
+            searchContext = prepass.context
           }
           const messages = toRequestMessages(
             prepared.history,

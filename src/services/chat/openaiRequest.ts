@@ -9,6 +9,7 @@ import type { FileAttachment, Message, UserMessage } from './types.js'
  * 把会话转成 OpenAI 兼容协议的请求体。
  * 该协议没有 Files API、latest_reminder 角色、服务端工具与 assistant 预填充，
  * 所以只保留「文本 + 图片」：图片从本地原件读取（发送前已缩到长边 4096），编码成 data URL 内联。
+ * 智能搜索由官方检索预取完成，结果以首条 system 消息注入。
  */
 
 /** 一次请求内联图片的总字节上限；超出预算时优先保留最新的图片 */
@@ -60,6 +61,8 @@ const toContent = (
 export type OpenAiRequestContext = {
   history: Message[]
   question: UserMessage
+  /** 官方检索结果的摘要；有值时作为首条 system 消息插入 */
+  context?: string
 }
 
 /**
@@ -68,7 +71,7 @@ export type OpenAiRequestContext = {
  */
 export const createOpenAiRequest = async (
   provider: Provider,
-  { history, question }: OpenAiRequestContext,
+  { history, question, context }: OpenAiRequestContext,
   loadBlob: (id: string) => Promise<Blob | undefined>,
   signal: AbortSignal
 ): Promise<OpenAiChatRequest> => {
@@ -117,6 +120,10 @@ export const createOpenAiRequest = async (
     if (answer !== '') {
       messages.push({ role: 'assistant', content: answer })
     }
+  }
+  // 检索结果放在最前面：端点看到的是一段「本轮可用资料」，历史轮次里不会重复出现
+  if (context) {
+    messages.unshift({ role: 'system', content: context })
   }
   messages.push({ role: 'user', content: toContent(question.content, questionImages) ?? '' })
 
