@@ -189,6 +189,7 @@ export const zh = {
   providerModelLabel: '模型 ID',
   providerModelPlaceholder: '例如 deepseek-flash',
   providerModelPlaceholderOpenai: '例如 gpt-4o-mini',
+  providerModelPlaceholderAnthropic: '例如 claude-sonnet-4',
   providerModelsFetch: '获取模型列表',
   providerModelsLoading: '获取中…',
   providerModelsFailed: '获取模型列表失败，请检查地址与 API Key',
@@ -203,17 +204,35 @@ export const zh = {
   providerCapSpeech: '语音',
   providerCapBalance: '余额',
   providerCapabilitiesHint: '只勾选端点确实支持的功能；未勾选时请求不会带对应参数。',
+  providerCapabilitiesOfficialHint:
+    '勾选项超出端点本身的能力：联网搜索、语音与余额由 DeepSeek 官方服务提供，需要在下方配置官方能力 Key。',
+  providerBuiltinLocked:
+    '内置 DeepSeek 固定使用官方地址、模型与协议，只能修改 API Key 与支持的功能。',
   providerProtocolLabel: '接口协议',
   providerProtocolDeepseek: 'DeepSeek 兼容',
   providerProtocolOpenai: 'OpenAI 兼容',
   providerProtocolHint:
-    'OpenAI 兼容走 /v1/chat/completions，只支持聊天与图片内联，联网搜索、语音与余额不可用；内置提供商固定使用 DeepSeek 协议。',
+    'DeepSeek 兼容的地址会按形态识别：站点根地址与带 /anthropic 的地址按 DeepSeek 扩展接口调用，/v1 等带版本段的地址按标准 Anthropic Messages API 调用。OpenAI 兼容走 /v1/chat/completions，只支持聊天与图片内联。内置提供商固定使用 DeepSeek 协议。',
   providerEndpointHint:
-    '端点需实现 DeepSeek 的 Anthropic 兼容接口并允许跨域访问；HTTPS 页面不能直连 http:// 地址。',
+    '可填站点根地址（自动补 /anthropic/v1），也可直接粘贴整条 /messages 端点；端点需允许跨域，HTTPS 页面不能直连 http:// 地址。',
+  providerEndpointHintAnthropic:
+    '按标准 Anthropic Messages API 调用（/v1/messages），附件不可用；端点需允许跨域，HTTPS 页面不能直连 http:// 地址。',
+  providerEndpointPreview: '实际请求：{url}',
   providerEndpointHintOpenai:
     '填根地址或 /v1 地址均可，客户端会补全 /v1/chat/completions；端点需允许跨域，HTTPS 页面不能直连 http:// 地址。',
   openAiDocumentUnsupported:
     'OpenAI 兼容协议暂不支持文档附件，请改用图片，或切换到 DeepSeek 协议的提供商。',
+  anthropicAttachmentUnsupported:
+    '标准 Anthropic 兼容端点暂不支持附件，请先移除附件，或切换到 DeepSeek 结构端点（带 /anthropic 的地址）。',
+  officialKeyLabel: '官方能力 Key',
+  officialKeyHint:
+    '联网搜索、语音与余额由 DeepSeek 官方服务提供，与上面选中的提供商无关；留空表示沿用内置 DeepSeek 的 Key。',
+  officialKeyPlaceholder: '留空表示沿用内置 DeepSeek 的 Key',
+  officialKeyInherited: '当前沿用内置 DeepSeek 的 Key',
+  officialKeyOverridden: '已单独配置官方 Key',
+  officialKeyReset: '恢复默认',
+  officialKeyMissing: '未配置官方 Key 时，联网搜索、语音与余额不可用。',
+  officialSearchFailed: '联网搜索失败，本次回答没有使用检索结果。',
   settingsLocaleZhCN: '简体中文',
   settingsLocaleEnUS: 'English',
 } as const

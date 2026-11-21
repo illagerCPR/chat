@@ -41,9 +41,9 @@ export type Provider = {
   /** 内置固定为 deepseek，自定义为 p- 前缀的随机 id */
   id: string
   name: string
-  /** 内置项不可删除，但允许改地址、Key 与模型 */
+  /** 内置项不可删除，名称、地址、模型与协议都固定，只能改 Key 与能力 */
   builtin: boolean
-  /** API 根地址，不含末尾斜杠；内置项默认取构建期 API_ORIGIN */
+  /** API 根地址，不含末尾斜杠；内置项固定为构建期 API_ORIGIN */
   baseUrl: string
   /** 空串表示未填写：内置项必须有 Key，自定义端点无需鉴权时可以留空 */
   apiKey: string
@@ -56,6 +56,30 @@ export type Provider = {
 export type ProvidersState = {
   providers: Provider[]
   activeId: string
+  /**
+   * 联网搜索、语音与余额走的 DeepSeek 官方通道所用的 Key。
+   * 空串表示沿用内置提供商自己的 Key；这三项能力始终请求官方地址，与当前提供商的地址无关。
+   */
+  officialApiKey: string
+}
+
+/**
+ * 端点的实际形态，由协议与地址共同决定：
+ * - deepseek：DeepSeek 的 Anthropic 兼容接口，收发扩展字段并走 Files API；
+ * - anthropic：标准的 Anthropic Messages API（第三方网关多为这一种）；
+ * - openai：/v1/chat/completions。
+ */
+export type ProviderShape = 'deepseek' | 'anthropic' | 'openai'
+
+/** 解析后的请求地址：形态决定扩展字段、附件方式与模型列表位置 */
+export type ResolvedEndpoint = {
+  /** 聊天与附件接口的前缀，如 https://host/anthropic/v1 */
+  base: string
+  shape: 'deepseek' | 'anthropic'
+  messages: string
+  files: string
+  /** 模型列表：DeepSeek 在站点根，Anthropic 兼容在版本前缀下 */
+  models: string
 }
 
 const STORAGE_KEY = 'chat-demo:providers'
@@ -80,13 +104,20 @@ const CUSTOM_CAPABILITIES: ProviderCapabilities = {
 }
 
 /**
- * 各协议真正支持的能力。OpenAI 兼容协议没有 Files API、server tools、余额与
- * DeepSeek 语音接口，这些能力即使声明的存档里是开着的也不生效。
+ * 各形态真正支持的能力：
+ * - DeepSeek 形态按扩展接口全开；
+ * - Anthropic 形态没有 Files API（附件置灰），搜索改由官方检索预取实现；
+ * - OpenAI 兼容协议只做聊天与图片内联。
+ * 语音与余额始终走官方通道，是否可用还取决于官方 Key 是否存在，见 isCapabilitySupported。
  */
-const PROTOCOL_CAPABILITIES: Record<ProviderProtocol, ProviderCapabilities> = {
+const SHAPE_CAPABILITIES: Record<ProviderShape, ProviderCapabilities> = {
   deepseek: FULL_CAPABILITIES,
+  anthropic: { files: false, thinking: true, search: true, speech: true, balance: true },
   openai: { files: true, thinking: true, search: false, speech: false, balance: false },
 }
+
+/** 需要 DeepSeek 官方 Key 的能力：搜索（Anthropic 形态的预取）、语音、余额 */
+const OFFICIAL_CAPABILITIES: (keyof ProviderCapabilities)[] = ['search', 'speech', 'balance']
 
 const readStorage = (key: string) => {
   try {
@@ -132,17 +163,18 @@ const readProvider = (value: unknown): Provider | null => {
   ) {
     return null
   }
+  const builtin = value.id === BUILTIN_PROVIDER_ID
   return {
     id: value.id,
-    name: value.name,
     // 内置标记只认 id，存档被改成可删除也不会生效
-    builtin: value.id === BUILTIN_PROVIDER_ID,
-    baseUrl: value.baseUrl,
+    builtin,
+    // 内置项的名称、地址与模型已锁定：旧版本改过的值在这里迁回默认，避免「改过却只读」的错位
+    name: builtin ? 'DeepSeek' : value.name,
+    baseUrl: builtin ? DEFAULT_BASE_URL : value.baseUrl,
     apiKey: typeof value.apiKey === 'string' ? value.apiKey : '',
-    model: value.model,
+    model: builtin ? BUILTIN_MODEL : value.model,
     // 0.3.0 的存档没有协议字段；内置项始终按 DeepSeek 协议
-    protocol:
-      value.id !== BUILTIN_PROVIDER_ID && value.protocol === 'openai' ? 'openai' : 'deepseek',
+    protocol: builtin || value.protocol !== 'openai' ? 'deepseek' : 'openai',
     capabilities: readCapabilities(value.capabilities),
   }
 }
@@ -175,11 +207,13 @@ const readState = (): ProvidersState => {
   const legacyKey = readStorage(LEGACY_API_KEY) ?? ''
   let providers: Provider[] = []
   let activeId: string | null = null
+  let officialApiKey = ''
   try {
     const stored: unknown = JSON.parse(readStorage(STORAGE_KEY) ?? 'null')
     if (isRecord(stored) && Array.isArray(stored.providers)) {
       providers = stored.providers.flatMap((item) => readProvider(item) ?? [])
       activeId = typeof stored.activeId === 'string' ? stored.activeId : null
+      officialApiKey = typeof stored.officialApiKey === 'string' ? stored.officialApiKey : ''
     }
   } catch {
     // 存档损坏时回到只有内置提供商的初始状态
@@ -190,6 +224,7 @@ const readState = (): ProvidersState => {
     activeId: providers.some((provider) => provider.id === activeId)
       ? (activeId as string)
       : providers[0].id,
+    officialApiKey: officialApiKey.trim(),
   }
 }
 
@@ -223,23 +258,63 @@ export const useActiveProvider = (): Provider =>
       state.providers.find((provider) => provider.id === state.activeId) ?? state.providers[0]
   )
 
-/** 按协议收窄后的能力：存档里的勾选值再与协议支持的能力取交集 */
-export const getCapabilities = (provider: Provider): ProviderCapabilities => {
-  const supported = PROTOCOL_CAPABILITIES[provider.protocol] ?? PROTOCOL_CAPABILITIES.deepseek
-  return {
-    files: provider.capabilities.files && supported.files,
-    thinking: provider.capabilities.thinking && supported.thinking,
-    search: provider.capabilities.search && supported.search,
-    speech: provider.capabilities.speech && supported.speech,
-    balance: provider.capabilities.balance && supported.balance,
+/**
+ * 按形态收窄后的能力：存档里的勾选值再与形态支持的能力取交集，
+ * 需要官方 Key 的能力（Anthropic 形态的搜索、语音、余额）额外要求官方 Key 存在。
+ */
+export const getCapabilities = (provider: Provider): ProviderCapabilities => ({
+  files: provider.capabilities.files && isCapabilitySupported(provider, 'files'),
+  thinking: provider.capabilities.thinking && isCapabilitySupported(provider, 'thinking'),
+  search: provider.capabilities.search && isCapabilitySupported(provider, 'search'),
+  speech: provider.capabilities.speech && isCapabilitySupported(provider, 'speech'),
+  balance: provider.capabilities.balance && isCapabilitySupported(provider, 'balance'),
+})
+
+/** 该提供商是否支持某项能力，设置页据此禁用勾选框 */
+export const isCapabilitySupported = (
+  provider: Provider,
+  key: keyof ProviderCapabilities
+): boolean => {
+  const shape = getProviderShape(provider)
+  if (!SHAPE_CAPABILITIES[shape][key]) {
+    return false
   }
+  // 附件与深度思考只受形态限制；搜索在 DeepSeek 形态走 server tools，由端点自行实现
+  if (!OFFICIAL_CAPABILITIES.includes(key)) {
+    return true
+  }
+  if (key === 'search' && shape === 'deepseek') {
+    return true
+  }
+  return hasOfficialApiKey()
 }
 
-/** 该协议是否支持某项能力，设置页据此禁用勾选框 */
-export const isCapabilitySupported = (
-  protocol: ProviderProtocol,
-  key: keyof ProviderCapabilities
-): boolean => (PROTOCOL_CAPABILITIES[protocol] ?? PROTOCOL_CAPABILITIES.deepseek)[key]
+/** 当前提供商实际使用的形态；OpenAI 兼容协议不参与地址解析 */
+export const getProviderShape = (provider: Provider): ProviderShape =>
+  provider.protocol === 'openai' ? 'openai' : resolveEndpoint(provider.baseUrl).shape
+
+/** 官方通道（搜索、语音、余额）的地址，不受当前提供商影响 */
+export const OFFICIAL_BASE_URL = DEFAULT_BASE_URL
+
+/** 官方通道实际使用的 Key：单独配置优先，否则沿用内置 DeepSeek 的 Key */
+export const getOfficialApiKey = (): string => {
+  const { providers, officialApiKey } = useProviders.getState()
+  const builtinKey = providers.find((provider) => provider.builtin)?.apiKey ?? ''
+  return officialApiKey !== '' ? officialApiKey : builtinKey
+}
+
+export const hasOfficialApiKey = (): boolean => getOfficialApiKey() !== ''
+
+/** 组件订阅「官方 Key 是否可用」：能力勾选框与输入区的按钮要随它重渲染 */
+export const useOfficialKeyReady = (): boolean =>
+  useProviders((state) => {
+    const builtinKey = state.providers.find((provider) => provider.builtin)?.apiKey ?? ''
+    return state.officialApiKey !== '' || builtinKey !== ''
+  })
+
+export const setOfficialApiKey = (apiKey: string) => {
+  commit({ officialApiKey: apiKey.trim() })
+}
 
 export const setActiveProvider = (id: string) => {
   if (useProviders.getState().providers.some((provider) => provider.id === id)) {
@@ -250,8 +325,14 @@ export const setActiveProvider = (id: string) => {
 type ProviderPatch = Partial<Omit<Provider, 'id' | 'builtin'>>
 
 export const updateProvider = (id: string, patch: ProviderPatch) => {
-  // 内置项固定 DeepSeek 协议：换成 OpenAI 兼容会丢掉身份提示、标题与搜索工具
-  const next = id === BUILTIN_PROVIDER_ID ? { ...patch, protocol: 'deepseek' as const } : patch
+  // 内置项的身份固定为官方 DeepSeek：名称、地址、模型与协议都不接受改动
+  const next: ProviderPatch =
+    id === BUILTIN_PROVIDER_ID
+      ? {
+          ...(patch.apiKey !== undefined ? { apiKey: patch.apiKey } : {}),
+          ...(patch.capabilities !== undefined ? { capabilities: patch.capabilities } : {}),
+        }
+      : patch
   commit({
     providers: useProviders
       .getState()
@@ -329,9 +410,51 @@ export const openAiBase = (baseUrl: string): string => {
   }
 }
 
+/**
+ * 解析请求地址。可填站点根、带路径前缀的基地址，或直接粘贴整条端点：
+ * - `https://api.deepseek.com`、`…/anthropic`、`…/anthropic/v1` → DeepSeek 形态，补全 `/anthropic/v1`；
+ * - `https://gw.example.com/provider/v1/message(s)` → 去掉端点段，按 Anthropic 形态请求 `…/provider/v1/messages`；
+ * - `…/provider/v1`、`…/provider` → Anthropic 形态，缺版本段时补 `/v1`。
+ * 根地址仍按 DeepSeek 结构补全（与 0.3.1 之前一致），要标准 Anthropic 形态请明确写到 `/v1`。
+ */
+export const resolveEndpoint = (baseUrl: string): ResolvedEndpoint => {
+  // 粘贴整条端点时先摘掉末段，避免拼成 …/messages/messages
+  const cleaned = normalizeBaseUrl(baseUrl).replace(/\/(?:messages?)$/i, '')
+  const empty: ResolvedEndpoint = {
+    base: '',
+    shape: 'deepseek',
+    messages: '',
+    files: '',
+    models: '',
+  }
+  if (cleaned === '') {
+    return empty
+  }
+  let url: URL
+  try {
+    url = new URL(cleaned)
+  } catch {
+    return empty
+  }
+  const origin = url.origin
+  const path = url.pathname.replace(/\/+$/, '')
+  // 带 /anthropic 段的地址视为 DeepSeek 形态；根地址同样保持 DeepSeek 结构
+  const deepseek = path === '' || /\/(?:anthropic)(?:\/v\d+[a-z0-9]*)?$/i.test(path)
+  const versioned = /\/v\d+[a-z0-9]*$/i.test(path)
+  const base =
+    path === '' ? `${origin}/anthropic/v1` : versioned ? `${origin}${path}` : `${origin}${path}/v1`
+  return {
+    base,
+    shape: deepseek ? 'deepseek' : 'anthropic',
+    messages: `${base}/messages`,
+    files: `${base}/files`,
+    models: deepseek ? `${origin}/models` : `${base}/models`,
+  }
+}
+
 /** 拉取模型列表、校验 Key 的地址：两种协议的版本段规则不同 */
 export const modelsUrl = (baseUrl: string, protocol: ProviderProtocol): string =>
-  `${protocol === 'openai' ? openAiBase(baseUrl) : normalizeBaseUrl(baseUrl)}/models`
+  protocol === 'openai' ? `${openAiBase(baseUrl)}/models` : resolveEndpoint(baseUrl).models
 
 /** 可以发起请求：地址有效，且内置项已填 Key（自定义端点允许无鉴权） */
 export const isProviderReady = (provider: Provider): boolean =>

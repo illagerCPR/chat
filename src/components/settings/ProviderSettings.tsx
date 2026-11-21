@@ -7,18 +7,22 @@ import { Select } from '../base/Select.js'
 import { listModels } from '../../services/api/models.js'
 import {
   addProvider,
+  getProviderShape,
   isCapabilitySupported,
   isValidBaseUrl,
   normalizeBaseUrl,
   removeProvider,
+  resolveEndpoint,
   setActiveProvider,
   updateProvider,
+  useOfficialKeyReady,
   useProviders,
   type Provider,
   type ProviderCapabilities,
   type ProviderProtocol,
 } from '../../services/providers.js'
 import { ApiKeyField } from './ApiKeyField.js'
+import { OfficialKeyField } from './OfficialKeyField.js'
 import styles from './Settings.module.css'
 
 const CAPABILITIES: { key: keyof ProviderCapabilities; label: TranslationKey }[] = [
@@ -58,6 +62,10 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
   const [fetchingModels, setFetchingModels] = useState(false)
   const [modelsError, setModelsError] = useState(false)
   const modelListId = `provider-models-${provider.id}`
+  const shape = getProviderShape(provider)
+  // 订阅官方 Key：语音、余额与第三方端点上的搜索是否可选由它决定
+  const officialReady = useOfficialKeyReady()
+  const endpoint = resolveEndpoint(provider.baseUrl)
 
   const commitName = () => {
     const value = name.trim()
@@ -122,6 +130,7 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
           className={styles.providerInput}
           value={name}
           spellCheck={false}
+          disabled={provider.builtin}
           onChange={(event) => setName(event.target.value)}
           onBlur={commitName}
           onKeyDown={commitOnEnter}
@@ -150,11 +159,20 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
           placeholder={t('providerBaseUrlPlaceholder')}
           autoComplete="off"
           spellCheck={false}
+          disabled={provider.builtin}
           onChange={(event) => setBaseUrl(event.target.value)}
           onBlur={commitBaseUrl}
           onKeyDown={commitOnEnter}
         />
+        {endpoint.messages !== '' ? (
+          <div className={styles.description}>
+            {t('providerEndpointPreview', { url: endpoint.messages })}
+          </div>
+        ) : null}
       </Field>
+      {provider.builtin ? (
+        <div className={styles.description}>{t('providerBuiltinLocked')}</div>
+      ) : null}
       {urlError ? <div className={styles.error}>{t('providerBaseUrlInvalid')}</div> : null}
       <Field label={t('providerModelLabel')}>
         <div className={styles.providerInputRow}>
@@ -163,24 +181,29 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
             value={model}
             list={models.length > 0 ? modelListId : undefined}
             placeholder={t(
-              provider.protocol === 'openai'
+              shape === 'openai'
                 ? 'providerModelPlaceholderOpenai'
-                : 'providerModelPlaceholder'
+                : shape === 'anthropic'
+                  ? 'providerModelPlaceholderAnthropic'
+                  : 'providerModelPlaceholder'
             )}
             autoComplete="off"
             spellCheck={false}
+            disabled={provider.builtin}
             onChange={(event) => setModel(event.target.value)}
             onBlur={commitModel}
             onKeyDown={commitOnEnter}
           />
-          <button
-            type="button"
-            className={styles.providerInlineButton}
-            disabled={fetchingModels || !isValidBaseUrl(provider.baseUrl)}
-            onClick={() => void fetchModels()}
-          >
-            {fetchingModels ? t('providerModelsLoading') : t('providerModelsFetch')}
-          </button>
+          {provider.builtin ? null : (
+            <button
+              type="button"
+              className={styles.providerInlineButton}
+              disabled={fetchingModels || !isValidBaseUrl(provider.baseUrl)}
+              onClick={() => void fetchModels()}
+            >
+              {fetchingModels ? t('providerModelsLoading') : t('providerModelsFetch')}
+            </button>
+          )}
         </div>
         {models.length > 0 ? (
           <datalist id={modelListId}>
@@ -196,8 +219,8 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
         <div className={styles.label}>{t('providerCapabilitiesLabel')}</div>
         <div className={styles.providerCapabilityList}>
           {CAPABILITIES.map((item) => {
-            // 协议本身不具备的能力置灰：勾着也不会生效，避免造成已启用的误解
-            const supported = isCapabilitySupported(provider.protocol, item.key)
+            // 端点形态不具备的能力置灰：勾着也不会生效，避免造成已启用的误解
+            const supported = isCapabilitySupported(provider, item.key)
             return (
               <label
                 key={item.key}
@@ -225,9 +248,18 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
           })}
         </div>
         <div className={styles.description}>{t('providerCapabilitiesHint')}</div>
+        {shape !== 'openai' && !officialReady ? (
+          <div className={styles.description}>{t('providerCapabilitiesOfficialHint')}</div>
+        ) : null}
       </div>
       <div className={styles.description}>
-        {t(provider.protocol === 'openai' ? 'providerEndpointHintOpenai' : 'providerEndpointHint')}
+        {t(
+          shape === 'openai'
+            ? 'providerEndpointHintOpenai'
+            : shape === 'anthropic'
+              ? 'providerEndpointHintAnthropic'
+              : 'providerEndpointHint'
+        )}
       </div>
     </div>
   )
@@ -282,6 +314,7 @@ export const ProviderSettings = () => {
         {t('providerAdd')}
       </button>
       <ProviderEditor key={active.id} provider={active} />
+      <OfficialKeyField />
     </>
   )
 }

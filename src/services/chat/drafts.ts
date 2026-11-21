@@ -10,7 +10,7 @@ import {
   validateFiles,
   type UploadTask,
 } from '../attachments.js'
-import { getActiveProvider, useProviders } from '../providers.js'
+import { getActiveProvider, getProviderShape, useProviders } from '../providers.js'
 import type { FileAttachment } from './types.js'
 
 export type DraftAttachment = {
@@ -100,8 +100,8 @@ export const prepareDraftMessage = (draft: Draft, tasks: Record<string, UploadTa
   if (!text && draft.attachments.length === 0) {
     return null
   }
-  // OpenAI 兼容协议没有 Files API，附件只保留本地原件，发送时内联
-  const needsUpload = getActiveProvider().protocol === 'deepseek'
+  // 只有 DeepSeek 形态有 Files API：OpenAI 兼容协议只保留本地原件发送时内联
+  const needsUpload = getProviderShape(getActiveProvider()) === 'deepseek'
   const files: (FileAttachment & { serverId: string; blob: Blob })[] = []
   for (const attachment of draft.attachments) {
     const task = tasks[attachment.id]
@@ -159,7 +159,7 @@ export const clearAllDrafts = () => {
  */
 useProviders.subscribe(() => {
   const provider = getActiveProvider()
-  if (provider.protocol !== 'deepseek') {
+  if (getProviderShape(provider) !== 'deepseek') {
     return
   }
   for (const draft of useDrafts.getState().drafts.values()) {

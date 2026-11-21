@@ -12,7 +12,12 @@ import {
   useUploads,
 } from '../attachments.js'
 import { refreshBalance } from '../balance.js'
-import { getActiveProvider, getCapabilities, type Provider } from '../providers.js'
+import {
+  getActiveProvider,
+  getCapabilities,
+  getProviderShape,
+  type Provider,
+} from '../providers.js'
 import { useSettings } from '../settings.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
@@ -24,6 +29,7 @@ import {
   prepareDraftMessage,
 } from './drafts.js'
 import { createLatestReminder } from './latestReminder.js'
+import { notifyOfficialSearchFailed, runOfficialSearch } from './officialSearch.js'
 import { createOpenAiRequest } from './openaiRequest.js'
 import {
   applyEvent,
@@ -64,19 +70,38 @@ const serverTools = (search: boolean): CreateMessageRequest['tools'] => {
   return tools
 }
 
+/** 标准 Anthropic 接口必填的输出上限；DeepSeek 扩展接口不传 */
+const ANTHROPIC_MAX_TOKENS = 8192
+/** 标准 Anthropic 开启思考时的额度，按规范必须小于 max_tokens */
+const ANTHROPIC_THINKING_BUDGET = 2048
+
 /**
- * 按提供商能力拼请求体：不支持的能力对应的扩展字段整个省略，避免严格校验的网关直接报错。
- * 助手身份说明与自动标题都是 DeepSeek 定制字段，只在内置提供商上发送。
+ * 按提供商能力与端点形态拼请求体：不支持的能力对应的扩展字段整个省略，避免严格校验的网关直接报错。
+ * - DeepSeek 形态：助手身份说明、自动标题、安全审核与 server tools 都是定制字段；
+ * - 标准 Anthropic 形态：只发文档要求的字段，联网检索的结果以 system 上下文注入。
  */
 const createRequestBody = (
   provider: Provider,
   initial: AssistantMessage,
   messages: MessageParam[],
-  withTitle: boolean
+  withTitle: boolean,
+  context?: string
 ): CreateMessageRequest => {
   const capabilities = getCapabilities(provider)
+  const model = initial.model ?? provider.model
+  if (getProviderShape(provider) === 'anthropic') {
+    return {
+      model,
+      max_tokens: ANTHROPIC_MAX_TOKENS,
+      ...(context ? { system: context } : {}),
+      messages,
+      ...(capabilities.thinking && initial.thinking
+        ? { thinking: { type: 'enabled', budget_tokens: ANTHROPIC_THINKING_BUDGET } }
+        : {}),
+    }
+  }
   return {
-    model: initial.model ?? provider.model,
+    model,
     ...(provider.builtin ? { system: SYSTEM_PROMPT } : {}),
     messages,
     ...(capabilities.thinking
@@ -299,8 +324,8 @@ const createReply = (): AssistantMessage => {
     providerId: provider.id,
     thinking: thinking && capabilities.thinking,
     search: search && capabilities.search,
-    // 续写依赖 assistant 预填充，只有 DeepSeek 的 Anthropic 兼容接口支持
-    prefix: provider.protocol === 'deepseek',
+    // 续写依赖 assistant 预填充：OpenAI 兼容协议不支持，Anthropic 兼容接口都支持
+    prefix: getProviderShape(provider) !== 'openai',
     status: 'pending',
     blocks: [],
   }
@@ -862,8 +887,8 @@ const refreshRequest = (sessionId: string, request: Request): Request => {
  *   失败静默跳过，该附件不进入本次请求，下次发送时再试。
  */
 const prepareFiles = async (sessionId: string, request: Request, signal: AbortSignal) => {
-  // OpenAI 兼容协议没有 Files API：图片在构建请求时从本地原件内联，这里不补传
-  if (getActiveProvider().protocol !== 'deepseek') {
+  // 只有 DeepSeek 形态有 Files API：OpenAI 兼容协议内联图片，标准 Anthropic 形态不带附件
+  if (getProviderShape(getActiveProvider()) !== 'deepseek') {
     return request
   }
   const epoch = historyEpoch
@@ -1032,12 +1057,15 @@ const waitForRetry = (attempt: number, signal: AbortSignal) =>
  */
 const streamReply = async (sessionId: string, initial: AssistantMessage, request: Request) => {
   const controller = new AbortController()
-  // 自动标题是 DeepSeek 的扩展字段，其他协议发不出去，也就不必登记
-  if (getActiveProvider().protocol === 'deepseek' && !getSession(sessionId)?.title) {
+  // 自动标题是 DeepSeek 的扩展字段，其他端点发不出去，也就不必登记
+  if (getProviderShape(getActiveProvider()) === 'deepseek' && !getSession(sessionId)?.title) {
     titleRequests.add(controller)
   }
   set((state) => ({ streaming: { ...state.streaming, [sessionId]: controller } }))
   let reply = initial
+  /** 官方检索预取只做一次，重试发送时复用结果 */
+  let searchContext: string | undefined
+  let searched = false
   let frame = 0
   const flush = () => {
     cancelAnimationFrame(frame)
@@ -1062,8 +1090,9 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         updateReply(sessionId, reply)
         persist(sessionId)
         const provider = getActiveProvider()
+        const shape = getProviderShape(provider)
         let events: AsyncGenerator<MessageStreamEvent>
-        if (provider.protocol === 'openai') {
+        if (shape === 'openai') {
           const body = await createOpenAiRequest(
             provider,
             { history: prepared.history, question: prepared.question },
@@ -1071,6 +1100,44 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
             controller.signal
           )
           events = streamOpenAiMessage(provider.apiKey, provider.baseUrl, body, controller.signal)
+        } else if (shape === 'anthropic') {
+          // 标准 Anthropic 形态没有 Files API，附件在设置页已置灰；切换提供商后残留的附件明确报错，不静默丢弃
+          if (prepared.question.files.length > 0) {
+            throw new ApiError('protocol', { key: 'anthropicAttachmentUnsupported' })
+          }
+          if (initial.search && !searched) {
+            searched = true
+            try {
+              const result = await runOfficialSearch(prepared.question.content, controller.signal)
+              if (result) {
+                // 检索块排在最前，界面上先看到来源再看到正文
+                reply = { ...reply, blocks: [...result.blocks, ...reply.blocks] }
+                searchContext = result.context
+                updateReply(sessionId, reply)
+                persist(sessionId)
+              }
+            } catch (error) {
+              // 检索失败不拖垮主请求：按没搜到继续，另用轻提示说明
+              if (controller.signal.aborted) {
+                throw error
+              }
+              notifyOfficialSearchFailed()
+            }
+          }
+          const messages = toRequestMessages(
+            prepared.history,
+            prepared.question,
+            prepared.prefix,
+            initial.thinking ?? false,
+            latestReminder,
+            false
+          )
+          events = streamMessage(
+            provider.baseUrl,
+            provider.apiKey,
+            createRequestBody(provider, initial, messages, false, searchContext),
+            controller.signal
+          )
         } else {
           const messages = toRequestMessages(
             prepared.history,
@@ -1080,6 +1147,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
             latestReminder
           )
           events = streamMessage(
+            provider.baseUrl,
             provider.apiKey,
             createRequestBody(provider, initial, messages, titleRequests.has(controller)),
             controller.signal

@@ -1,6 +1,11 @@
 import { useTranslate } from '../../i18n/index.js'
 import { formatAmount, formatBalanceList, useBalance } from '../../services/balance.js'
-import { getCapabilities, useActiveProvider } from '../../services/providers.js'
+import {
+  getCapabilities,
+  getOfficialApiKey,
+  useActiveProvider,
+  useOfficialKeyReady,
+} from '../../services/providers.js'
 
 export type BalanceStatus = {
   /** 已格式化数值，或「查询中 / 查询失败 / 余额不足」等状态文案 */
@@ -17,11 +22,13 @@ export type BalanceStatus = {
 export const useBalanceStatus = (): BalanceStatus | null => {
   const t = useTranslate()
   const provider = useActiveProvider()
+  // 余额走官方通道：官方 Key 变化时这一块要跟着重渲染
+  useOfficialKeyReady()
   const data = useBalance((state) => state.data)
   const loading = useBalance((state) => state.loading)
   const error = useBalance((state) => state.error)
 
-  if (!getCapabilities(provider).balance || provider.apiKey === '') {
+  if (!getCapabilities(provider).balance || getOfficialApiKey() === '') {
     return null
   }
   if (data) {

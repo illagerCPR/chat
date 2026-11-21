@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TranslationMessage } from '../../i18n/index.js'
 import { transcribe } from '../../services/api/speech.js'
 import { startRecording, type Recording } from '../../services/speech/recorder.js'
-import { getActiveProvider } from '../../services/providers.js'
+import { getOfficialApiKey } from '../../services/providers.js'
 import { showToast } from '../base/toastState.js'
 
 export type VoiceInputStatus = 'idle' | 'recording' | 'transcribing'
@@ -75,7 +75,8 @@ export const useVoiceInput = (onText: (text: string) => void) => {
       controller = new AbortController()
       controllerRef.current = controller
       setStatus('transcribing')
-      const text = await transcribe(getActiveProvider().apiKey, audio, controller.signal)
+      // 语音识别走官方通道，与当前提供商的 Key 无关
+      const text = await transcribe(getOfficialApiKey(), audio, controller.signal)
       if (controller.signal.aborted || operationRef.current !== operation) {
         return
       }

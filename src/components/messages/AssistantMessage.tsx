@@ -11,6 +11,7 @@ import { openSettings } from '../settings/settingsDialogState.js'
 import {
   BUILTIN_PROVIDER_ID,
   getCapabilities,
+  useOfficialKeyReady,
   useActiveProvider,
   useProviders,
 } from '../../services/providers.js'
@@ -53,6 +54,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   const view = useReplyView(message, streaming)
   const provider = useActiveProvider()
   const providers = useProviders((state) => state.providers)
+  // 朗读按钮是否可用取决于官方 Key，变化时要跟着重渲染
+  useOfficialKeyReady()
   // 自定义提供商的回答标注来源；内置 DeepSeek 保持界面原样
   const source =
     message.providerId && message.providerId !== BUILTIN_PROVIDER_ID

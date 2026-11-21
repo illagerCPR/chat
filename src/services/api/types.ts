@@ -175,10 +175,13 @@ export type DeepseekReadUrlTool = {
 export type CreateMessageRequest = {
   /** 自定义提供商可以是任意模型 id，内置默认 deepseek-flash */
   model: string
-  /** 以下扩展字段按提供商能力选择性发送：不支持时整个省略，避免严格校验的网关报错 */
+  /** 标准 Anthropic 接口必填；DeepSeek 扩展接口不传 */
+  max_tokens?: number
+  /** 以下扩展字段按端点形态与能力选择性发送：不支持时整个省略，避免严格校验的网关报错 */
   system?: string
   messages: MessageParam[]
-  thinking?: { type: 'enabled' | 'disabled' }
+  /** DeepSeek 用 type 开关；标准 Anthropic 开启思考时还要带 budget_tokens */
+  thinking?: { type: 'enabled' | 'disabled'; budget_tokens?: number }
   tools?: (DeepseekWebSearchTool | DeepseekReadUrlTool)[]
   safety_check?: { level: 'high' }
   title?: { enabled: boolean }

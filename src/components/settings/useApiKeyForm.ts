@@ -1,14 +1,21 @@
 import { useState } from 'react'
-import { ApiError, verifyApiKey } from '../../services/api/client.js'
+import { ApiError } from '../../services/api/client.js'
 import { classifyApiError } from '../../services/api/errors.js'
-import { isValidBaseUrl, setProviderApiKey, type Provider } from '../../services/providers.js'
 import { useTranslate } from '../../i18n/index.js'
 
 /**
- * 输入 API Key 后先用该提供商地址的 GET /models 校验，通过才保存。
- * 留空表示端点无需鉴权（自定义提供商），此时跳过校验直接保存。
+ * 候选 Key 的输入状态：校验方式由调用方给出（按提供商的 /models、或官方通道的地址），
+ * 这里只管输入、校验中与失败文案。留空输入表示「不修改」。
  */
-export const useApiKeyForm = (provider: Provider, onSaved?: () => void) => {
+export type ApiKeySubmission = {
+  verify: (apiKey: string) => Promise<void>
+  save: (apiKey: string) => void
+  /** 校验前是否已具备条件；自定义提供商要求地址合法 */
+  ready: boolean
+  onSaved?: () => void
+}
+
+export const useApiKeyForm = ({ verify, save, ready, onSaved }: ApiKeySubmission) => {
   const t = useTranslate()
   const [value, setValue] = useState('')
   const [verifying, setVerifying] = useState(false)
@@ -32,15 +39,15 @@ export const useApiKeyForm = (provider: Provider, onSaved?: () => void) => {
 
   const submit = async () => {
     const apiKey = value.trim()
-    // 留空只表示「不修改」；地址不合法时先让用户填好地址再校验
-    if (verifying || apiKey === '' || (apiKey !== '' && !isValidBaseUrl(provider.baseUrl))) {
+    // 留空只表示「不修改」；条件不满足时先让用户把地址填好再校验
+    if (verifying || apiKey === '' || !ready) {
       return
     }
     setVerifying(true)
     setFailure(null)
     try {
-      await verifyApiKey(provider.baseUrl, apiKey, provider.protocol)
-      setProviderApiKey(provider.id, apiKey)
+      await verify(apiKey)
+      save(apiKey)
       setValue('')
       onSaved?.()
     } catch (e) {

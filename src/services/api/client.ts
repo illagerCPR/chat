@@ -1,8 +1,9 @@
 import { translate, type TranslationMessage } from '../../i18n/index.js'
 import {
   getActiveProvider,
+  getProviderShape,
   modelsUrl,
-  normalizeBaseUrl,
+  resolveEndpoint,
   type ProviderProtocol,
 } from '../providers.js'
 import { resizeUploadImage } from '../../utils/resizeUploadImage.js'
@@ -16,12 +17,15 @@ import type {
   MessageStreamEvent,
 } from './types.js'
 
-/** 当前提供商的 API 根地址；内置 DeepSeek 默认取构建期 API_ORIGIN */
-export const apiBase = () => normalizeBaseUrl(getActiveProvider().baseUrl)
-/** Anthropic 兼容接口的前缀 */
-const anthropicBase = () => `${apiBase()}/anthropic/v1`
+/** 当前提供商按地址解析后的请求地址；形态决定扩展字段与附件方式 */
+const endpoint = () => resolveEndpoint(getActiveProvider().baseUrl)
+/** 上传类接口只在 DeepSeek 形态使用，等价的布尔判断收在一处 */
+const activeShape = (): 'deepseek' | 'anthropic' =>
+  getProviderShape(getActiveProvider()) === 'anthropic' ? 'anthropic' : 'deepseek'
 /** 引用 Files API 上传的图片、调用 Anthropic 兼容 Files API 时必须携带 */
 const FILES_BETA = 'files-api-2025-04-14'
+/** 标准 Anthropic 接口要求携带的 API 版本头 */
+const ANTHROPIC_VERSION = '2023-06-01'
 
 export type ApiErrorKind =
   /** 非 2xx 响应 */
@@ -94,28 +98,91 @@ export const request = async (url: string, init: RequestInit): Promise<Response>
 const bearerHeaders = (apiKey: string): Record<string, string> =>
   apiKey === '' ? {} : { Authorization: `Bearer ${apiKey}` }
 
-const anthropicHeaders = (apiKey: string, beta: boolean): Record<string, string> => ({
-  // DeepSeek 兼容接口的鉴权方式，也可使用 Authorization: Bearer。
-  ...(apiKey === '' ? {} : { 'x-api-key': apiKey }),
-  // Files API 和通过 file_id 引用图片时必传；纯文本聊天无需携带。
-  ...(beta ? { 'anthropic-beta': FILES_BETA } : {}),
+/** 标准 Anthropic 网关的鉴权头：有的只认 x-api-key、有的只认 Bearer，两种都发 */
+const standardAnthropicHeaders = (apiKey: string): Record<string, string> => ({
+  ...(apiKey === '' ? {} : { 'x-api-key': apiKey, Authorization: `Bearer ${apiKey}` }),
+  'anthropic-version': ANTHROPIC_VERSION,
 })
+
+/** 查模型列表用的头：标准 Anthropic 形态与聊天接口一致，其余只发 Bearer */
+export const modelHeaders = (
+  apiKey: string,
+  shape: 'deepseek' | 'anthropic' | 'openai'
+): Record<string, string> =>
+  shape === 'anthropic' ? standardAnthropicHeaders(apiKey) : bearerHeaders(apiKey)
+
+/**
+ * Anthropic 格式的鉴权头，按端点形态选择：
+ * - DeepSeek 形态沿用 x-api-key，带 Files API 时再加 anthropic-beta；
+ * - 标准 Anthropic 形态按规范带 anthropic-version，鉴权头两种都发。
+ */
+const anthropicHeaders = (
+  shape: 'deepseek' | 'anthropic',
+  apiKey: string,
+  beta: boolean
+): Record<string, string> => {
+  if (shape === 'anthropic') {
+    return standardAnthropicHeaders(apiKey)
+  }
+  return {
+    ...(apiKey === '' ? {} : { 'x-api-key': apiKey }),
+    // Files API 和通过 file_id 引用图片时必传；纯文本聊天无需携带。
+    ...(beta ? { 'anthropic-beta': FILES_BETA } : {}),
+  }
+}
 
 /**
  * 用 GET /models 校验 API Key（不产生费用）。
  * baseUrl 与协议由调用方给出，用于校验尚未保存的提供商；OpenAI 兼容端点需要补 /v1。
+ * 标准 Anthropic 形态的网关未必实现 /models：遇到 404/405 时改用一次极短的 /messages 请求确认鉴权。
  */
 export const verifyApiKey = async (
   baseUrl: string,
   apiKey: string,
+  model: string,
   protocol: ProviderProtocol,
   signal?: AbortSignal
 ): Promise<void> => {
-  await request(modelsUrl(baseUrl, protocol), {
-    method: 'GET',
-    headers: bearerHeaders(apiKey),
-    signal,
-  })
+  const resolved = resolveEndpoint(baseUrl)
+  // 标准 Anthropic 网关的 /models 同样要 anthropic-version 与 x-api-key，不能只发 Bearer
+  const shape = protocol === 'openai' ? 'openai' : resolved.shape
+  try {
+    await request(modelsUrl(baseUrl, protocol), {
+      method: 'GET',
+      headers: modelHeaders(apiKey, shape),
+      signal,
+    })
+    return
+  } catch (error) {
+    const missingModels =
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 405) &&
+      protocol === 'deepseek' &&
+      resolved.shape === 'anthropic'
+    if (!missingModels) {
+      throw error
+    }
+  }
+  try {
+    await request(resolved.messages, {
+      method: 'POST',
+      headers: { ...standardAnthropicHeaders(apiKey), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        max_tokens: 16,
+        messages: [{ role: 'user', content: 'ping' }],
+      }),
+      signal,
+    })
+  } catch (error) {
+    // 400/422 说明 Key 已被接受、只是请求参数或模型不合规；429 是限流。这些不当作 Key 无效
+    const accepted =
+      error instanceof ApiError &&
+      (error.status === 400 || error.status === 422 || error.status === 429)
+    if (!accepted) {
+      throw error
+    }
+  }
 }
 
 /**
@@ -133,9 +200,9 @@ export const uploadFile = async (
     form.append('purpose', purpose)
   }
   form.append('file', purpose === null ? await resizeUploadImage(file, signal) : file)
-  const response = await request(`${anthropicBase()}/files`, {
+  const response = await request(endpoint().files, {
     method: 'POST',
-    headers: anthropicHeaders(apiKey, true),
+    headers: anthropicHeaders(activeShape(), apiKey, true),
     body: form,
     signal,
   })
@@ -144,9 +211,9 @@ export const uploadFile = async (
 
 /** DELETE /anthropic/v1/files/{file_id} */
 export const deleteFile = async (apiKey: string, fileId: string): Promise<void> => {
-  await request(`${anthropicBase()}/files/${encodeURIComponent(fileId)}`, {
+  await request(`${endpoint().files}/${encodeURIComponent(fileId)}`, {
     method: 'DELETE',
-    headers: anthropicHeaders(apiKey, true),
+    headers: anthropicHeaders(activeShape(), apiKey, true),
   })
 }
 
@@ -162,14 +229,16 @@ const hasFile = (body: CreateMessageRequest) =>
  * ping、保活注释与无法解析的内容不产出；中止请求时抛出 signal 的 AbortError。
  */
 export async function* streamMessage(
+  baseUrl: string,
   apiKey: string,
   body: CreateMessageRequest,
   signal: AbortSignal
 ): AsyncGenerator<MessageStreamEvent> {
-  const response = await request(`${anthropicBase()}/messages`, {
+  const resolved = resolveEndpoint(baseUrl)
+  const response = await request(resolved.messages, {
     method: 'POST',
     headers: {
-      ...anthropicHeaders(apiKey, hasFile(body)),
+      ...anthropicHeaders(resolved.shape, apiKey, hasFile(body)),
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
     },

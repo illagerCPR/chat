@@ -197,6 +197,7 @@ export const en = {
   providerModelLabel: 'Model ID',
   providerModelPlaceholder: 'e.g. deepseek-flash',
   providerModelPlaceholderOpenai: 'e.g. gpt-4o-mini',
+  providerModelPlaceholderAnthropic: 'e.g. claude-sonnet-4',
   providerModelsFetch: 'Fetch models',
   providerModelsLoading: 'Fetching…',
   providerModelsFailed: 'Could not fetch the model list; check the URL and API key',
@@ -212,17 +213,35 @@ export const en = {
   providerCapBalance: 'Balance',
   providerCapabilitiesHint:
     'Only enable what the endpoint supports; unchecked features are left out of requests.',
+  providerCapabilitiesOfficialHint:
+    'Web search, voice and balance come from the official DeepSeek service rather than the endpoint; configure the official API key below to use them.',
+  providerBuiltinLocked:
+    'The built-in DeepSeek provider always uses the official URL, model and protocol; only its API key and supported features can change.',
   providerProtocolLabel: 'API protocol',
   providerProtocolDeepseek: 'DeepSeek compatible',
   providerProtocolOpenai: 'OpenAI compatible',
   providerProtocolHint:
-    'OpenAI compatibility uses /v1/chat/completions and covers chat plus inline images only; web search, voice and balance are unavailable. The built-in provider always uses the DeepSeek protocol.',
+    'DeepSeek-compatible URLs are detected by shape: a site root or a path containing /anthropic uses the DeepSeek extensions, while a versioned path such as /v1 uses the standard Anthropic Messages API. OpenAI compatibility uses /v1/chat/completions and covers chat plus inline images only. The built-in provider always uses the DeepSeek protocol.',
   providerEndpointHint:
-    'The endpoint must implement the DeepSeek Anthropic-compatible API and allow cross-origin requests; an HTTPS page cannot call http:// addresses.',
+    'Enter a site root (the /anthropic/v1 prefix is appended) or paste the full /messages endpoint. The endpoint must allow cross-origin requests, and an HTTPS page cannot call http:// addresses.',
+  providerEndpointHintAnthropic:
+    'Called as the standard Anthropic Messages API (/v1/messages); attachments are unavailable. The endpoint must allow cross-origin requests, and an HTTPS page cannot call http:// addresses.',
+  providerEndpointPreview: 'Request URL: {url}',
   providerEndpointHintOpenai:
     'Enter either the root URL or a /v1 URL and /v1/chat/completions is filled in automatically. The endpoint must allow cross-origin requests, and an HTTPS page cannot call http:// addresses.',
   openAiDocumentUnsupported:
     'OpenAI-compatible endpoints do not accept document attachments yet. Attach images instead, or switch to a DeepSeek provider.',
+  anthropicAttachmentUnsupported:
+    'Standard Anthropic-compatible endpoints do not accept attachments yet. Remove the attachments or switch to a DeepSeek-shaped endpoint (a URL containing /anthropic).',
+  officialKeyLabel: 'Official API key',
+  officialKeyHint:
+    'Web search, voice and balance are served by DeepSeek itself, regardless of the provider selected above; leave empty to reuse the built-in DeepSeek key.',
+  officialKeyPlaceholder: 'Leave empty to reuse the built-in DeepSeek key',
+  officialKeyInherited: 'Currently reusing the built-in DeepSeek key',
+  officialKeyOverridden: 'A separate official key is configured',
+  officialKeyReset: 'Use default',
+  officialKeyMissing: 'Without an official key, web search, voice and balance are unavailable.',
+  officialSearchFailed: 'Web search failed; this answer was generated without search results.',
   settingsLocaleZhCN: 'Simplified Chinese',
   settingsLocaleEnUS: 'English',
 } satisfies Record<keyof typeof zh, string>

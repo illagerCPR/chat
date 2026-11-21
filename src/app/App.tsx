@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useTranslate } from '../i18n/index.js'
 import { useSettings } from '../services/settings.js'
-import { getCapabilities, useActiveProvider } from '../services/providers.js'
+import { getCapabilities, useActiveProvider, useOfficialKeyReady } from '../services/providers.js'
 import { refreshBalance } from '../services/balance.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
 import {
@@ -20,6 +20,7 @@ import { ensureProviderReady } from '../components/settings/settingsDialogState.
 import { SettingsDialog } from '../components/settings/SettingsDialog.js'
 import { Toast } from '../components/base/Toast.js'
 import { showToast } from '../components/base/toastState.js'
+import { onOfficialSearchNotice } from '../services/chat/officialSearch.js'
 import { onUploadNotice } from '../services/attachments.js'
 import { Button } from '../components/base/Button.js'
 import { stopReadAloud } from '../services/speech/readAloud.js'
@@ -60,11 +61,14 @@ export const App = () => {
 
   // 文件数、存储空间达到上限时，附件上只显示「上传失败」，原因用 toast 说明
   useEffect(() => onUploadNotice(showToast), [])
+  // 官方检索预取失败时轻提示：主请求照常发送，只是没有检索结果
+  useEffect(() => onOfficialSearchNotice(showToast), [])
   useEffect(bindChatPersistence, [])
 
   // 切换提供商、改 Key 或改能力后重新查询余额；不支持余额的提供商不查询
   const provider = useActiveProvider()
-  // 协议不支持余额时（OpenAI 兼容）这里恒为 false，切换后不会发出查询
+  // 协议不支持余额、或没有官方 Key 时这里为 false，不会发出查询
+  useOfficialKeyReady()
   const balanceEnabled = getCapabilities(provider).balance
   useEffect(() => {
     void refreshBalance()

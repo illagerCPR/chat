@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { IconEditOutline16 } from '../base/icons.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { IconButton } from '../base/IconButton.js'
-import { useApiKeyForm } from './useApiKeyForm.js'
-import { isValidBaseUrl, type Provider } from '../../services/providers.js'
+import { verifyApiKey } from '../../services/api/client.js'
+import { isValidBaseUrl, setProviderApiKey, type Provider } from '../../services/providers.js'
 import { useTranslate } from '../../i18n/index.js'
+import { useApiKeyForm } from './useApiKeyForm.js'
 import styles from './Settings.module.css'
 
 /**
@@ -15,11 +16,16 @@ export const ApiKeyField = ({ provider }: { provider: Provider }) => {
   const t = useTranslate()
   const isMobile = useIsMobile()
   const [editing, setEditing] = useState(false)
-  const form = useApiKeyForm(provider, () => setEditing(false))
-  const apiKey = provider.apiKey
-  const showInput = apiKey === '' || editing
   // 键盘校验需要一个可用的地址；地址还没填好时先提示，不让用户白等一次失败
   const addressReady = isValidBaseUrl(provider.baseUrl)
+  const form = useApiKeyForm({
+    verify: (apiKey) => verifyApiKey(provider.baseUrl, apiKey, provider.model, provider.protocol),
+    save: (apiKey) => setProviderApiKey(provider.id, apiKey),
+    ready: addressReady,
+    onSaved: () => setEditing(false),
+  })
+  const apiKey = provider.apiKey
+  const showInput = apiKey === '' || editing
 
   return (
     <div className={styles.cell}>

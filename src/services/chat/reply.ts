@@ -185,8 +185,7 @@ export const canContinueReply = (reply: AssistantMessage): boolean => {
     return false
   }
   return (
-    reply.status === 'stopped' ||
-    (reply.status === 'done' && reply.stopReason === 'max_tokens')
+    reply.status === 'stopped' || (reply.status === 'done' && reply.stopReason === 'max_tokens')
   )
 }
 
@@ -201,9 +200,12 @@ const isUsableReply = (message: Message): message is AssistantMessage =>
   !message.blocks.some((block) => block.type === 'text' && block.isTemplate) &&
   getReplyText(message) !== ''
 
-/** 有文件时用内容块数组：先文件后文本，文件按 Files API 的 file_id 引用 */
-const toUserParam = ({ content, files }: UserMessage): MessageParam => {
-  const blocks = toFileBlocks(files)
+/**
+ * 有文件时用内容块数组：先文件后文本，文件按 Files API 的 file_id 引用。
+ * 标准 Anthropic 形态没有 Files API，附件不进请求（设置页已置灰，历史轮次的附件直接跳过）。
+ */
+const toUserParam = ({ content, files }: UserMessage, keepFiles: boolean): MessageParam => {
+  const blocks = keepFiles ? toFileBlocks(files) : []
   return blocks.length === 0
     ? { role: 'user', content }
     : {
@@ -223,7 +225,8 @@ const toUserParam = ({ content, files }: UserMessage): MessageParam => {
 const toAssistantParam = (
   { blocks }: AssistantMessage,
   prefix = false,
-  thinking = false
+  thinking = false,
+  extensions = true
 ): Extract<MessageParam, { role: 'assistant' }> => {
   const content: AssistantBlockParam[] = []
   // 成功阅读的网页靠签名恢复正文；缺少有效签名时，调用与结果都不回传。
@@ -240,6 +243,11 @@ const toAssistantParam = (
   /** 正在拼接的文本块；遇到任何非文本块（含不回传的思考块）就结束 */
   let text: TextBlockParam | null = null
   for (const block of blocks) {
+    // 标准 Anthropic 形态只回传正文：思考签名与工具块都由 DeepSeek 扩展接口生成，不能原样回传
+    if (!extensions && block.type !== 'text') {
+      text = null
+      continue
+    }
     // 空思考不改变续写位置，也不应把两段正文隔开，导致后端额外插入空行。
     if (prefix && block.type === 'thinking' && !block.thinking.trim()) {
       continue
@@ -305,11 +313,16 @@ export const toRequestMessages = (
   question: UserMessage,
   prefix?: AssistantMessage,
   thinking = prefix?.thinking ?? false,
-  latestReminder?: string
+  latestReminder?: string,
+  extensions = true
 ): MessageParam[] => {
   const messages: MessageParam[] = []
   let previousReminder: string | undefined
   const appendReminder = (reminder: string | undefined) => {
+    // latest_reminder 是 DeepSeek 的扩展角色，标准 Anthropic 形态不发送
+    if (!extensions) {
+      return
+    }
     // 仅在当前分支首次出现或内容变化时插入快照；缺少快照的消息保持原有内容。
     if (reminder && reminder !== previousReminder) {
       messages.push({ role: 'latest_reminder', content: reminder })
@@ -322,12 +335,12 @@ export const toRequestMessages = (
       continue
     }
     appendReminder(reply.latestReminder)
-    messages.push(toUserParam(user), toAssistantParam(reply))
+    messages.push(toUserParam(user, extensions), toAssistantParam(reply, false, false, extensions))
   }
   appendReminder(latestReminder)
-  messages.push(toUserParam(question))
+  messages.push(toUserParam(question, extensions))
   if (prefix?.prefix) {
-    const assistant = toAssistantParam(prefix, true, thinking)
+    const assistant = toAssistantParam(prefix, true, thinking, extensions)
     // 没有非空白正文或有效思考时直接重发原问题，避免服务端拒绝空 Prefill。
     if (
       assistant.content.some(

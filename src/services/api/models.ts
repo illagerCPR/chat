@@ -1,5 +1,5 @@
-import { modelsUrl, type Provider } from '../providers.js'
-import { ApiError, request } from './client.js'
+import { getProviderShape, modelsUrl, type Provider } from '../providers.js'
+import { ApiError, modelHeaders, request } from './client.js'
 
 /**
  * GET /models 拉取模型列表。DeepSeek 与 OpenAI 兼容端点返回同一种结构：
@@ -11,7 +11,7 @@ export const listModels = async (provider: Provider, signal?: AbortSignal): Prom
   }
   const response = await request(modelsUrl(provider.baseUrl, provider.protocol), {
     method: 'GET',
-    headers: provider.apiKey === '' ? {} : { Authorization: `Bearer ${provider.apiKey}` },
+    headers: modelHeaders(provider.apiKey, getProviderShape(provider)),
     signal,
   })
   const text = await response.text()

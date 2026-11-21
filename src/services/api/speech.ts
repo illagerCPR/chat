@@ -1,4 +1,5 @@
-import { ApiError, apiBase, request } from './client.js'
+import { OFFICIAL_BASE_URL } from '../providers.js'
+import { ApiError, request } from './client.js'
 
 /**
  * 语音接口：
@@ -6,7 +7,8 @@ import { ApiError, apiBase, request } from './client.js'
  * - TTS：POST /v1/tools/tts，返回音频字节流（产出首帧后即返回 200）
  * 鉴权都用 Authorization: Bearer。
  */
-const toolsBase = () => `${apiBase()}/v1/tools`
+/** 语音是 DeepSeek 官方专有接口：固定请求官方地址，与当前提供商的地址无关 */
+const toolsBase = () => `${OFFICIAL_BASE_URL}/v1/tools`
 
 export type TtsVoice = 'stella' | 'tide'
 

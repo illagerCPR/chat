@@ -6,7 +6,7 @@ import { classifyApiError, getUploadErrorInfo, isRetryableApiError } from './api
 import type { FilePurpose } from './api/types.js'
 import { loadFile } from './chat/db.js'
 import type { FileAttachment } from './chat/types.js'
-import { getActiveProvider } from './providers.js'
+import { getActiveProvider, getProviderShape } from './providers.js'
 import { ACCEPT_FILE_EXTS } from './uploadExts.js'
 
 /** 允许上传的扩展名，按扩展名白名单过滤，清单见 uploadExts.ts */
@@ -178,7 +178,7 @@ export const uploadAttachment = (
   isImage: boolean
 ): Promise<string> => {
   // OpenAI 兼容协议没有 Files API：不发起上传，标记为本地就绪即可
-  if (getActiveProvider().protocol !== 'deepseek') {
+  if (getProviderShape(getActiveProvider()) !== 'deepseek') {
     setTask(id, { status: 'local' })
     return Promise.resolve('')
   }

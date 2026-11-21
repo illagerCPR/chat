@@ -3,7 +3,7 @@ import type { TranslationMessage } from '../../i18n/index.js'
 import { ApiError } from '../api/client.js'
 import { classifyApiError } from '../api/errors.js'
 import { synthesize, TTS_SAMPLE_RATE } from '../api/speech.js'
-import { getActiveProvider } from '../providers.js'
+import { getOfficialApiKey } from '../providers.js'
 import { useSettings } from '../settings.js'
 
 /**
@@ -94,7 +94,8 @@ export const toggleReadAloud = (
   useReadAloud.setState({ messageId, status: 'loading' })
   // 音色与提供商在开始朗读时读取，设置中切换后下一次朗读生效
   const { ttsVoice } = useSettings.getState()
-  const apiKey = getActiveProvider().apiKey
+  // 朗读走官方通道，与当前提供商的 Key 无关
+  const apiKey = getOfficialApiKey()
 
   void (async () => {
     let nextTime = 0
