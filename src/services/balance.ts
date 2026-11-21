@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { getBalance, type Balance, type BalanceInfo } from './api/balance.js'
-import { useSettings } from './settings.js'
+import { getActiveProvider } from './providers.js'
 
 /**
  * 账户余额：页面打开时查一次，设置里可手动刷新，每次回复结束后静默更新。
@@ -29,8 +29,9 @@ const reset = () => {
  * 失败也不清掉已有数据，只是保留上一次读数。
  */
 export const refreshBalance = async (quiet = false): Promise<void> => {
-  const apiKey = useSettings.getState().apiKey
-  if (!apiKey) {
+  const provider = getActiveProvider()
+  // 余额是 DeepSeek 专有接口，自定义提供商未声明该能力、或没有 Key 时不查询
+  if (!provider.capabilities.balance || provider.apiKey === '') {
     reset()
     return
   }
@@ -41,7 +42,7 @@ export const refreshBalance = async (quiet = false): Promise<void> => {
     useBalance.setState({ loading: true, error: null })
   }
   try {
-    const data = await getBalance(apiKey, current.signal)
+    const data = await getBalance(provider.apiKey, current.signal)
     if (controller === current) {
       useBalance.setState({ data, loading: false, error: null })
     }

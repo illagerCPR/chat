@@ -173,12 +173,14 @@ export type DeepseekReadUrlTool = {
 }
 
 export type CreateMessageRequest = {
-  model: ChatModel
-  system: string
+  /** 自定义提供商可以是任意模型 id，内置默认 deepseek-flash */
+  model: string
+  /** 以下扩展字段按提供商能力选择性发送：不支持时整个省略，避免严格校验的网关报错 */
+  system?: string
   messages: MessageParam[]
-  thinking: { type: 'enabled' | 'disabled' }
-  tools: (DeepseekWebSearchTool | DeepseekReadUrlTool)[]
-  safety_check: { level: 'high' }
+  thinking?: { type: 'enabled' | 'disabled' }
+  tools?: (DeepseekWebSearchTool | DeepseekReadUrlTool)[]
+  safety_check?: { level: 'high' }
   title?: { enabled: boolean }
 }
 

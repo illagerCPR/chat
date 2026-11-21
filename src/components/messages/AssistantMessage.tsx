@@ -8,6 +8,7 @@ import { continueReply, regenerateReply } from '../../services/chat/store.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
 import type { AssistantMessage as AssistantMessageType } from '../../services/chat/types.js'
 import { openSettings } from '../settings/settingsDialogState.js'
+import { BUILTIN_PROVIDER_ID, useActiveProvider, useProviders } from '../../services/providers.js'
 import { IconButton } from '../base/IconButton.js'
 import { Button } from '../base/Button.js'
 import { Markdown } from '../markdown/Markdown.js'
@@ -45,6 +46,15 @@ export const AssistantMessage = memo(function AssistantMessage({
 }) {
   const t = useTranslate()
   const view = useReplyView(message, streaming)
+  const provider = useActiveProvider()
+  const providers = useProviders((state) => state.providers)
+  // 自定义提供商的回答标注来源；内置 DeepSeek 保持界面原样
+  const source =
+    message.providerId && message.providerId !== BUILTIN_PROVIDER_ID
+      ? (providers.find((item) => item.id === message.providerId)?.name ??
+        message.model ??
+        message.providerId)
+      : null
   const panelEntry = useSearchPanel((state) => state.entry)
   const notice = streaming ? null : describeReply(message)
   // 安全拒绝：已下发的思考与正文按协议丢弃，只显示模板答复。
@@ -102,7 +112,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                 <button
                   type="button"
                   className={styles.noticeAction}
-                  onClick={() => openSettings('data')}
+                  onClick={() => openSettings('providers')}
                 >
                   {t('changeApiKey')}
                 </button>
@@ -141,9 +151,14 @@ export const AssistantMessage = memo(function AssistantMessage({
       {streaming ? null : (
         <div className={styles.bottom}>
           <BranchSwitcher versions={versions} disabled={busy} onSelect={onSelectVersion} />
+          {source ? (
+            <span className={styles.modelBadge} title={message.model ?? source}>
+              {source}
+            </span>
+          ) : null}
           <div className={clsx(styles.actions, isLast && styles.alwaysShow)}>
             {copyText ? <CopyButton text={copyText} /> : null}
-            {responseText && !refused ? (
+            {responseText && !refused && provider.capabilities.speech ? (
               <ReadAloudButton messageId={message.id} text={responseText} />
             ) : null}
             <IconButton

@@ -1,4 +1,4 @@
-import { ApiError, API_ORIGIN, request } from './client.js'
+import { ApiError, apiBase, request } from './client.js'
 
 /**
  * GET /user/balance 查询账户余额。
@@ -61,7 +61,7 @@ const readBalance = (value: unknown): Balance | null => {
 
 /** 查询余额；响应结构不符时按协议错误处理，调用方展示统一的失败文案。 */
 export const getBalance = async (apiKey: string, signal?: AbortSignal): Promise<Balance> => {
-  const response = await request(`${API_ORIGIN}/user/balance`, {
+  const response = await request(`${apiBase()}/user/balance`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${apiKey}` },
     signal,

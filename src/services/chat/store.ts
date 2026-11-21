@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
 import { ApiError, streamMessage } from '../api/client.js'
-import type { ChatModel, CreateMessageRequest } from '../api/types.js'
+import type { CreateMessageRequest, MessageParam } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import {
   cancelUpload,
@@ -11,6 +11,7 @@ import {
   useUploads,
 } from '../attachments.js'
 import { refreshBalance } from '../balance.js'
+import { getActiveProvider, type Provider } from '../providers.js'
 import { useSettings } from '../settings.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
@@ -39,9 +40,7 @@ import {
   type UserMessage,
 } from './types.js'
 
-/** deepseek-flash 同时支持深度思考与图片输入 */
-const MODEL: ChatModel = 'deepseek-flash'
-/** 所有生成请求统一携带的助手身份说明 */
+/** 内置 DeepSeek 的助手身份说明；自定义提供商不注入，避免把其他模型说成 DeepSeek */
 const SYSTEM_PROMPT = '该助手为DeepSeek，由深度求索公司创造。'
 /** 保留最近打开的详情；当前会话、生成中及尚未成功保存的会话不淘汰。 */
 const SESSION_CACHE_LIMIT = 5
@@ -62,6 +61,28 @@ const serverTools = (search: boolean): CreateMessageRequest['tools'] => {
   }
   return tools
 }
+
+/**
+ * 按提供商能力拼请求体：不支持的能力对应的扩展字段整个省略，避免严格校验的网关直接报错。
+ * 助手身份说明与自动标题都是 DeepSeek 定制字段，只在内置提供商上发送。
+ */
+const createRequestBody = (
+  provider: Provider,
+  initial: AssistantMessage,
+  messages: MessageParam[],
+  withTitle: boolean
+): CreateMessageRequest => ({
+  model: initial.model ?? provider.model,
+  ...(provider.builtin ? { system: SYSTEM_PROMPT } : {}),
+  messages,
+  ...(provider.capabilities.thinking
+    ? { thinking: { type: initial.thinking ? 'enabled' : 'disabled' } }
+    : {}),
+  ...(provider.capabilities.search
+    ? { safety_check: SAFETY_CHECK, tools: serverTools(initial.search ?? false) }
+    : {}),
+  ...(withTitle && provider.builtin ? { title: { enabled: true } } : {}),
+})
 
 /** 允许自动补标题的请求；手动重命名后取消本轮标题写入，包含主动清空标题的情况。 */
 const titleRequests = new Set<AbortController>()
@@ -260,16 +281,18 @@ export const bindChatPersistence = () => {
   }
 }
 
-/** 按当前开关创建回复：深度思考对应 thinking，智能搜索控制 deepseek_web_search。 */
+/** 按当前提供商与开关创建回复：提供商不支持的能力即使全局开关开着也不算开启。 */
 const createReply = (): AssistantMessage => {
   const { thinking, search } = useSettings.getState()
+  const provider = getActiveProvider()
   return {
     id: createId(),
     role: 'assistant',
     createdAt: Date.now(),
-    model: MODEL,
-    thinking,
-    search,
+    model: provider.model,
+    providerId: provider.id,
+    thinking: thinking && provider.capabilities.thinking,
+    search: search && provider.capabilities.search,
     prefix: true,
     status: 'pending',
     blocks: [],
@@ -715,12 +738,14 @@ export const continueReply = (sessionId: string, messageId: string) => {
     return
   }
   const { thinking, search } = useSettings.getState()
+  const provider = getActiveProvider()
   const reply: AssistantMessage = {
     ...previous,
-    // 未记录请求配置的回复，续写时使用默认模型和当前开关。
-    model: previous.model ?? MODEL,
-    thinking: previous.thinking ?? thinking,
-    search: previous.search ?? search,
+    // 未记录请求配置的回复，续写时使用当前提供商与开关。
+    model: previous.model ?? provider.model,
+    providerId: previous.providerId ?? provider.id,
+    thinking: previous.thinking ?? (thinking && provider.capabilities.thinking),
+    search: previous.search ?? (search && provider.capabilities.search),
     status: 'pending',
     stopReason: undefined,
     stopDetails: undefined,
@@ -833,7 +858,7 @@ const prepareFiles = async (sessionId: string, request: Request, signal: AbortSi
   // 服务端判定 file_id 失效时会清掉会话里的 serverId，先用最新消息替换请求快照，
   // 否则快照里仍是旧 id，补传会直接复用它。
   request = refreshRequest(sessionId, request)
-  const apiKey = useSettings.getState().apiKey ?? ''
+  const apiKey = getActiveProvider().apiKey
   const serverIds = new Map<string, string>()
   // 停止生成立即生效；上传本身不取消（输入框与其他消息可能共用同一任务），完成后照常写回 serverId
   const aborted = new Promise<never>((_, reject) => {
@@ -1021,17 +1046,10 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
           initial.thinking ?? false,
           latestReminder
         )
+        const provider = getActiveProvider()
         const events = streamMessage(
-          useSettings.getState().apiKey ?? '',
-          {
-            model: initial.model ?? MODEL,
-            system: SYSTEM_PROMPT,
-            messages,
-            thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
-            safety_check: SAFETY_CHECK,
-            tools: serverTools(initial.search ?? false),
-            ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
-          },
+          provider.apiKey,
+          createRequestBody(provider, initial, messages, titleRequests.has(controller)),
           controller.signal
         )
         const blockIndexes = new Map<number, number>()

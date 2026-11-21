@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useTranslate } from '../i18n/index.js'
 import { useSettings } from '../services/settings.js'
+import { useActiveProvider } from '../services/providers.js'
 import { refreshBalance } from '../services/balance.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
 import {
@@ -15,7 +16,7 @@ import { closeSearchPanel } from '../components/search/searchPanelState.js'
 import { SessionView } from '../components/session/SessionView.js'
 import { MobileHeader } from '../components/session/MobileHeader.js'
 import { Welcome } from '../components/session/Welcome.js'
-import { ensureApiKey } from '../components/settings/settingsDialogState.js'
+import { ensureProviderReady } from '../components/settings/settingsDialogState.js'
 import { SettingsDialog } from '../components/settings/SettingsDialog.js'
 import { Toast } from '../components/base/Toast.js'
 import { showToast } from '../components/base/toastState.js'
@@ -61,11 +62,11 @@ export const App = () => {
   useEffect(() => onUploadNotice(showToast), [])
   useEffect(bindChatPersistence, [])
 
-  // API Key 变化后重新查询余额；清空 Key 时余额区域随之隐藏
-  const apiKey = useSettings((state) => state.apiKey)
+  // 切换提供商、改 Key 或改能力后重新查询余额；不支持余额的提供商不查询
+  const provider = useActiveProvider()
   useEffect(() => {
     void refreshBalance()
-  }, [apiKey])
+  }, [provider.id, provider.apiKey, provider.capabilities.balance])
 
   // 搜索结果面板只属于当前会话
   useEffect(closeSearchPanel, [activeId])
@@ -77,7 +78,7 @@ export const App = () => {
   useEffect(() => {
     void initChat()
     // 首次打开先在设置里输入 API Key
-    ensureApiKey()
+    ensureProviderReady()
   }, [])
 
   return (

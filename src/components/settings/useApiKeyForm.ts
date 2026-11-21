@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { ApiError, verifyApiKey } from '../../services/api/client.js'
 import { classifyApiError } from '../../services/api/errors.js'
-import { setApiKey } from '../../services/settings.js'
+import { isValidBaseUrl, setProviderApiKey, type Provider } from '../../services/providers.js'
 import { useTranslate } from '../../i18n/index.js'
 
-/** 输入 API Key 后先用 GET /models 校验，通过才保存 */
-export const useApiKeyForm = (onSaved?: () => void) => {
+/**
+ * 输入 API Key 后先用该提供商地址的 GET /models 校验，通过才保存。
+ * 留空表示端点无需鉴权（自定义提供商），此时跳过校验直接保存。
+ */
+export const useApiKeyForm = (provider: Provider, onSaved?: () => void) => {
   const t = useTranslate()
   const [value, setValue] = useState('')
   const [verifying, setVerifying] = useState(false)
@@ -29,14 +32,15 @@ export const useApiKeyForm = (onSaved?: () => void) => {
 
   const submit = async () => {
     const apiKey = value.trim()
-    if (!apiKey || verifying) {
+    // 留空只表示「不修改」；地址不合法时先让用户填好地址再校验
+    if (verifying || apiKey === '' || (apiKey !== '' && !isValidBaseUrl(provider.baseUrl))) {
       return
     }
     setVerifying(true)
     setFailure(null)
     try {
-      await verifyApiKey(apiKey)
-      setApiKey(apiKey)
+      await verifyApiKey(provider.baseUrl, apiKey)
+      setProviderApiKey(provider.id, apiKey)
       setValue('')
       onSaved?.()
     } catch (e) {

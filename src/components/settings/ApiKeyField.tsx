@@ -1,33 +1,33 @@
 import { useState } from 'react'
 import { IconEditOutline16 } from '../base/icons.js'
-import { useSettings } from '../../services/settings.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { IconButton } from '../base/IconButton.js'
 import { useApiKeyForm } from './useApiKeyForm.js'
+import { isValidBaseUrl, type Provider } from '../../services/providers.js'
 import { useTranslate } from '../../i18n/index.js'
 import styles from './Settings.module.css'
 
-/** API Key 的编辑状态：输入框与移动端底部的「确定」按钮共用 */
-export const useApiKeyEditor = () => {
-  const apiKey = useSettings((state) => state.apiKey)
-  const [editing, setEditing] = useState(false)
-  const form = useApiKeyForm(() => setEditing(false))
-  return { apiKey, editing, setEditing, form, showInput: !apiKey || editing }
-}
-
-type ApiKeyEditor = ReturnType<typeof useApiKeyEditor>
-
-/** API Key：保存后只显示掩码，点编辑按钮才能重新输入 */
-export const ApiKeyField = ({ editor }: { editor: ApiKeyEditor }) => {
+/**
+ * API Key：保存后只显示掩码，点编辑按钮才能重新输入。
+ * 内置 DeepSeek 必须有 Key；自定义端点可留空表示无需鉴权。
+ */
+export const ApiKeyField = ({ provider }: { provider: Provider }) => {
   const t = useTranslate()
   const isMobile = useIsMobile()
-  const { apiKey, editing, setEditing, form, showInput } = editor
+  const [editing, setEditing] = useState(false)
+  const form = useApiKeyForm(provider, () => setEditing(false))
+  const apiKey = provider.apiKey
+  const showInput = apiKey === '' || editing
+  // 键盘校验需要一个可用的地址；地址还没填好时先提示，不让用户白等一次失败
+  const addressReady = isValidBaseUrl(provider.baseUrl)
 
   return (
     <div className={styles.cell}>
       <div className={styles.apiKey}>
-        <div className={styles.label}>{t('apiKeyStart')}</div>
-        {apiKey && !editing ? (
+        <div className={styles.label}>
+          {provider.builtin ? t('apiKeyStart') : t('providerApiKeyLabel')}
+        </div>
+        {apiKey !== '' && !editing ? (
           <div className={styles.apiKeySaved}>
             <span className={styles.apiKeyMask}>{'*'.repeat(apiKey.length)}</span>
             <IconButton
@@ -41,7 +41,9 @@ export const ApiKeyField = ({ editor }: { editor: ApiKeyEditor }) => {
           <div className={styles.apiKeyInput}>
             <input
               type="password"
-              placeholder={t('apiKeyPlaceholder')}
+              placeholder={
+                provider.builtin ? t('apiKeyPlaceholder') : t('providerApiKeyPlaceholder')
+              }
               autoComplete="off"
               spellCheck={false}
               // 移动端打开设置时不弹键盘，点编辑后才聚焦
@@ -55,12 +57,12 @@ export const ApiKeyField = ({ editor }: { editor: ApiKeyEditor }) => {
               }}
               onBlur={() => {
                 // 修改时没输入就离开，回到已保存的状态
-                if (apiKey && !form.value.trim()) {
+                if (apiKey !== '' && form.value.trim() === '') {
                   setEditing(false)
                 }
               }}
             />
-            {!isMobile && form.value.trim() ? (
+            {!isMobile && form.value.trim() !== '' && addressReady ? (
               <>
                 <span className={styles.divider} />
                 <button
@@ -77,24 +79,24 @@ export const ApiKeyField = ({ editor }: { editor: ApiKeyEditor }) => {
             ) : null}
           </div>
         )}
+        {provider.builtin ? null : (
+          <div className={styles.description}>
+            {addressReady ? t('providerApiKeyOptional') : t('providerBaseUrlFirst')}
+          </div>
+        )}
         {showInput && form.error ? <div className={styles.error}>{form.error}</div> : null}
       </div>
+      {isMobile && showInput && form.value.trim() !== '' && addressReady ? (
+        <button
+          type="button"
+          className={styles.mobileConfirm}
+          disabled={form.verifying}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => void form.submit()}
+        >
+          {form.verifying ? t('apiKeyVerifying') : t('confirm')}
+        </button>
+      ) : null}
     </div>
   )
-}
-
-/** 移动端：输入 API Key 时在选项下方显示整行「确定」 */
-export const ApiKeyConfirm = ({ editor: { showInput, form } }: { editor: ApiKeyEditor }) => {
-  const t = useTranslate()
-  return showInput && form.value.trim() ? (
-    <button
-      type="button"
-      className={styles.mobileConfirm}
-      disabled={form.verifying}
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={() => void form.submit()}
-    >
-      {form.verifying ? t('apiKeyVerifying') : t('confirm')}
-    </button>
-  ) : null
 }

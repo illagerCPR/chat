@@ -1,6 +1,6 @@
 import { useTranslate } from '../../i18n/index.js'
 import { formatAmount, formatBalanceList, useBalance } from '../../services/balance.js'
-import { useSettings } from '../../services/settings.js'
+import { useActiveProvider } from '../../services/providers.js'
 
 export type BalanceStatus = {
   /** 已格式化数值，或「查询中 / 查询失败 / 余额不足」等状态文案 */
@@ -13,15 +13,15 @@ export type BalanceStatus = {
   detail?: string
 }
 
-/** 未填写 API Key 时返回 null，界面不渲染余额区域。 */
+/** 提供商不支持余额、或尚未填写 API Key 时返回 null，界面不渲染余额区域。 */
 export const useBalanceStatus = (): BalanceStatus | null => {
   const t = useTranslate()
-  const apiKey = useSettings((state) => state.apiKey)
+  const provider = useActiveProvider()
   const data = useBalance((state) => state.data)
   const loading = useBalance((state) => state.loading)
   const error = useBalance((state) => state.error)
 
-  if (!apiKey) {
+  if (!provider.capabilities.balance || provider.apiKey === '') {
     return null
   }
   if (data) {

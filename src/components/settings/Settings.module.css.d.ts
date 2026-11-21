@@ -36,6 +36,19 @@ declare const styles: {
   readonly "balanceAction": string;
   readonly "balanceAmount": string;
   readonly "balanceValueError": string;
+  readonly "providerList": string;
+  readonly "providerRow": string;
+  readonly "providerSelect": string;
+  readonly "providerSelectActive": string;
+  readonly "providerName": string;
+  readonly "providerTag": string;
+  readonly "providerAdd": string;
+  readonly "providerEditor": string;
+  readonly "providerField": string;
+  readonly "providerInput": string;
+  readonly "inputError": string;
+  readonly "providerCapabilityList": string;
+  readonly "providerCapability": string;
 };
 export = styles;
 

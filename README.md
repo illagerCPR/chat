@@ -84,10 +84,24 @@ The output is written to `dist/`. Deploy it to a static web server or open `dist
 - Markdown, syntax highlighting, KaTeX math, and Mermaid diagrams.
 - Simplified Chinese and English, light and dark themes, mobile layouts, location settings, and chat history import and export.
 - Optional server-side storage: conversations and attachments persist in a SQLite data volume, with optional password protection.
+- Custom providers: point the app at any endpoint that implements the DeepSeek Anthropic-compatible API, with per-provider keys, models, and capability switches.
+
+## Providers
+
+Settings → Providers holds a list of API configurations. The built-in DeepSeek entry is always present and can be pointed at your own reverse proxy; additional entries let you talk to any endpoint that implements the DeepSeek Anthropic-compatible API (`/anthropic/v1/messages`, `/anthropic/v1/files`, `/models`).
+
+Each provider has its own base URL, API key, model ID, and capability switches for attachments, deep thinking, web search, voice, and balance. Only enabled capabilities appear in the interface, and disabled ones are left out of request bodies, so an endpoint that implements a subset of the API keeps working.
+
+Two constraints come from calling the endpoint straight from the browser:
+
+- The endpoint must allow cross-origin requests.
+- An HTTPS page cannot call an `http://` endpoint. Serve local models behind an HTTPS reverse proxy, or open the app over HTTP.
+
+OpenAI-compatible endpoints (`/v1/chat/completions`) are not supported yet.
 
 ## Data and storage
 
-Your API key and interface settings are always stored in the browser's localStorage. Where conversations live depends on how the app is deployed:
+Your provider settings and interface settings are always stored in the browser's localStorage. Keys are kept per provider and never sent anywhere except that provider. Where conversations live depends on how the app is deployed:
 
 - Static site: conversations and original attachments are stored in the browser's IndexedDB, isolated by browser profile and site origin.
 - Self-hosted Docker: conversations and attachments are stored in `/data/chat.db` on the server and persisted by the data volume; the browser only keeps page state, so any browser or device that reaches the instance sees the same conversations.
