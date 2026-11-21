@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
 import { ApiError, streamMessage } from '../api/client.js'
-import type { CreateMessageRequest, MessageParam } from '../api/types.js'
+import { streamOpenAiMessage } from '../api/openai.js'
+import type { CreateMessageRequest, MessageParam, MessageStreamEvent } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import {
   cancelUpload,
@@ -11,7 +12,7 @@ import {
   useUploads,
 } from '../attachments.js'
 import { refreshBalance } from '../balance.js'
-import { getActiveProvider, type Provider } from '../providers.js'
+import { getActiveProvider, getCapabilities, type Provider } from '../providers.js'
 import { useSettings } from '../settings.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
@@ -23,6 +24,7 @@ import {
   prepareDraftMessage,
 } from './drafts.js'
 import { createLatestReminder } from './latestReminder.js'
+import { createOpenAiRequest } from './openaiRequest.js'
 import {
   applyEvent,
   canContinueReply,
@@ -71,18 +73,21 @@ const createRequestBody = (
   initial: AssistantMessage,
   messages: MessageParam[],
   withTitle: boolean
-): CreateMessageRequest => ({
-  model: initial.model ?? provider.model,
-  ...(provider.builtin ? { system: SYSTEM_PROMPT } : {}),
-  messages,
-  ...(provider.capabilities.thinking
-    ? { thinking: { type: initial.thinking ? 'enabled' : 'disabled' } }
-    : {}),
-  ...(provider.capabilities.search
-    ? { safety_check: SAFETY_CHECK, tools: serverTools(initial.search ?? false) }
-    : {}),
-  ...(withTitle && provider.builtin ? { title: { enabled: true } } : {}),
-})
+): CreateMessageRequest => {
+  const capabilities = getCapabilities(provider)
+  return {
+    model: initial.model ?? provider.model,
+    ...(provider.builtin ? { system: SYSTEM_PROMPT } : {}),
+    messages,
+    ...(capabilities.thinking
+      ? { thinking: { type: initial.thinking ? 'enabled' : 'disabled' } }
+      : {}),
+    ...(capabilities.search
+      ? { safety_check: SAFETY_CHECK, tools: serverTools(initial.search ?? false) }
+      : {}),
+    ...(withTitle && provider.builtin ? { title: { enabled: true } } : {}),
+  }
+}
 
 /** 允许自动补标题的请求；手动重命名后取消本轮标题写入，包含主动清空标题的情况。 */
 const titleRequests = new Set<AbortController>()
@@ -285,15 +290,17 @@ export const bindChatPersistence = () => {
 const createReply = (): AssistantMessage => {
   const { thinking, search } = useSettings.getState()
   const provider = getActiveProvider()
+  const capabilities = getCapabilities(provider)
   return {
     id: createId(),
     role: 'assistant',
     createdAt: Date.now(),
     model: provider.model,
     providerId: provider.id,
-    thinking: thinking && provider.capabilities.thinking,
-    search: search && provider.capabilities.search,
-    prefix: true,
+    thinking: thinking && capabilities.thinking,
+    search: search && capabilities.search,
+    // 续写依赖 assistant 预填充，只有 DeepSeek 的 Anthropic 兼容接口支持
+    prefix: provider.protocol === 'deepseek',
     status: 'pending',
     blocks: [],
   }
@@ -739,13 +746,14 @@ export const continueReply = (sessionId: string, messageId: string) => {
   }
   const { thinking, search } = useSettings.getState()
   const provider = getActiveProvider()
+  const capabilities = getCapabilities(provider)
   const reply: AssistantMessage = {
     ...previous,
     // 未记录请求配置的回复，续写时使用当前提供商与开关。
     model: previous.model ?? provider.model,
     providerId: previous.providerId ?? provider.id,
-    thinking: previous.thinking ?? (thinking && provider.capabilities.thinking),
-    search: previous.search ?? (search && provider.capabilities.search),
+    thinking: previous.thinking ?? (thinking && capabilities.thinking),
+    search: previous.search ?? (search && capabilities.search),
     status: 'pending',
     stopReason: undefined,
     stopDetails: undefined,
@@ -854,6 +862,10 @@ const refreshRequest = (sessionId: string, request: Request): Request => {
  *   失败静默跳过，该附件不进入本次请求，下次发送时再试。
  */
 const prepareFiles = async (sessionId: string, request: Request, signal: AbortSignal) => {
+  // OpenAI 兼容协议没有 Files API：图片在构建请求时从本地原件内联，这里不补传
+  if (getActiveProvider().protocol !== 'deepseek') {
+    return request
+  }
   const epoch = historyEpoch
   // 服务端判定 file_id 失效时会清掉会话里的 serverId，先用最新消息替换请求快照，
   // 否则快照里仍是旧 id，补传会直接复用它。
@@ -923,6 +935,15 @@ const prepareFiles = async (sessionId: string, request: Request, signal: AbortSi
     question: resolve(request.question),
     prefix: request.prefix,
   }
+}
+
+/**
+ * 读取附件原件：刚发送的附件先落内存再异步落盘，请求可能跑在写库之前，
+ * 所以优先查 pendingFiles，再回落到本地存储。
+ */
+const loadAttachmentBlob = (sessionId: string) => async (id: string) => {
+  const pendingBlob = pendingFiles.get(sessionId)?.find((file) => file.id === id)?.blob
+  return pendingBlob ?? (await db.loadFile(id))
 }
 
 /** 本次请求实际会用到的服务端 file_id */
@@ -1011,7 +1032,8 @@ const waitForRetry = (attempt: number, signal: AbortSignal) =>
  */
 const streamReply = async (sessionId: string, initial: AssistantMessage, request: Request) => {
   const controller = new AbortController()
-  if (!getSession(sessionId)?.title) {
+  // 自动标题是 DeepSeek 的扩展字段，其他协议发不出去，也就不必登记
+  if (getActiveProvider().protocol === 'deepseek' && !getSession(sessionId)?.title) {
     titleRequests.add(controller)
   }
   set((state) => ({ streaming: { ...state.streaming, [sessionId]: controller } }))
@@ -1039,19 +1061,30 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         reply = { ...reply, latestReminder }
         updateReply(sessionId, reply)
         persist(sessionId)
-        const messages = toRequestMessages(
-          prepared.history,
-          prepared.question,
-          prepared.prefix,
-          initial.thinking ?? false,
-          latestReminder
-        )
         const provider = getActiveProvider()
-        const events = streamMessage(
-          provider.apiKey,
-          createRequestBody(provider, initial, messages, titleRequests.has(controller)),
-          controller.signal
-        )
+        let events: AsyncGenerator<MessageStreamEvent>
+        if (provider.protocol === 'openai') {
+          const body = await createOpenAiRequest(
+            provider,
+            { history: prepared.history, question: prepared.question },
+            loadAttachmentBlob(sessionId),
+            controller.signal
+          )
+          events = streamOpenAiMessage(provider.apiKey, provider.baseUrl, body, controller.signal)
+        } else {
+          const messages = toRequestMessages(
+            prepared.history,
+            prepared.question,
+            prepared.prefix,
+            initial.thinking ?? false,
+            latestReminder
+          )
+          events = streamMessage(
+            provider.apiKey,
+            createRequestBody(provider, initial, messages, titleRequests.has(controller)),
+            controller.signal
+          )
+        }
         const blockIndexes = new Map<number, number>()
         for await (const event of events) {
           receivedContent ||= event.type === 'content_block_start'

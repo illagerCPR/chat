@@ -39,7 +39,7 @@ export const useApiKeyForm = (provider: Provider, onSaved?: () => void) => {
     setVerifying(true)
     setFailure(null)
     try {
-      await verifyApiKey(provider.baseUrl, apiKey)
+      await verifyApiKey(provider.baseUrl, apiKey, provider.protocol)
       setProviderApiKey(provider.id, apiKey)
       setValue('')
       onSaved?.()

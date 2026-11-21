@@ -49,6 +49,7 @@ declare const styles: {
   readonly "inputError": string;
   readonly "providerCapabilityList": string;
   readonly "providerCapability": string;
+  readonly "providerCapabilityDisabled": string;
 };
 export = styles;
 

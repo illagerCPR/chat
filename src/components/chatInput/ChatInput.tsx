@@ -8,7 +8,7 @@ import {
   IconThinkOutline14,
 } from '../base/icons.js'
 import { setSearch, setThinking, useSettings } from '../../services/settings.js'
-import { getActiveProvider, useActiveProvider } from '../../services/providers.js'
+import { getActiveProvider, getCapabilities, useActiveProvider } from '../../services/providers.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { sendMessage, stopReply, useChatStore } from '../../services/chat/store.js'
 import {
@@ -51,7 +51,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     (state) => sessionId !== null && Object.hasOwn(state.streaming, sessionId)
   )
   const provider = useActiveProvider()
-  const { capabilities } = provider
+  const capabilities = getCapabilities(provider)
   const thinking = useSettings((state) => state.thinking)
   const importingHistory = useChatStore((state) => state.importingHistory)
   const isMobile = useIsMobile()

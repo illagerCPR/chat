@@ -188,6 +188,10 @@ export const zh = {
   providerBaseUrlInvalid: '请输入有效的 http(s) 地址',
   providerModelLabel: '模型 ID',
   providerModelPlaceholder: '例如 deepseek-flash',
+  providerModelPlaceholderOpenai: '例如 gpt-4o-mini',
+  providerModelsFetch: '获取模型列表',
+  providerModelsLoading: '获取中…',
+  providerModelsFailed: '获取模型列表失败，请检查地址与 API Key',
   providerApiKeyLabel: 'API Key',
   providerApiKeyPlaceholder: '留空表示无需鉴权',
   providerApiKeyOptional: '留空表示该端点无需鉴权',
@@ -199,8 +203,17 @@ export const zh = {
   providerCapSpeech: '语音',
   providerCapBalance: '余额',
   providerCapabilitiesHint: '只勾选端点确实支持的功能；未勾选时请求不会带对应参数。',
+  providerProtocolLabel: '接口协议',
+  providerProtocolDeepseek: 'DeepSeek 兼容',
+  providerProtocolOpenai: 'OpenAI 兼容',
+  providerProtocolHint:
+    'OpenAI 兼容走 /v1/chat/completions，只支持聊天与图片内联，联网搜索、语音与余额不可用；内置提供商固定使用 DeepSeek 协议。',
   providerEndpointHint:
     '端点需实现 DeepSeek 的 Anthropic 兼容接口并允许跨域访问；HTTPS 页面不能直连 http:// 地址。',
+  providerEndpointHintOpenai:
+    '填根地址或 /v1 地址均可，客户端会补全 /v1/chat/completions；端点需允许跨域，HTTPS 页面不能直连 http:// 地址。',
+  openAiDocumentUnsupported:
+    'OpenAI 兼容协议暂不支持文档附件，请改用图片，或切换到 DeepSeek 协议的提供商。',
   settingsLocaleZhCN: '简体中文',
   settingsLocaleEnUS: 'English',
 } as const

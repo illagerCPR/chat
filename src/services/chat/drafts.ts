@@ -6,9 +6,11 @@ import {
   isImage,
   resolveMimeType,
   uploadAttachment,
+  useUploads,
   validateFiles,
   type UploadTask,
 } from '../attachments.js'
+import { getActiveProvider, useProviders } from '../providers.js'
 import type { FileAttachment } from './types.js'
 
 export type DraftAttachment = {
@@ -92,21 +94,25 @@ export const retryDraftAttachment = (
   }
 }
 
-/** 发送按钮和实际提交共用规则：有内容，且全部附件已上传成功。 */
+/** 发送按钮和实际提交共用规则：有内容，且全部附件已就绪（需要上传的协议还必须拿到服务端 id）。 */
 export const prepareDraftMessage = (draft: Draft, tasks: Record<string, UploadTask>) => {
   const text = draft.text.trim()
   if (!text && draft.attachments.length === 0) {
     return null
   }
+  // OpenAI 兼容协议没有 Files API，附件只保留本地原件，发送时内联
+  const needsUpload = getActiveProvider().protocol === 'deepseek'
   const files: (FileAttachment & { serverId: string; blob: Blob })[] = []
   for (const attachment of draft.attachments) {
     const task = tasks[attachment.id]
-    if (task?.status !== 'done' || !task.serverId) {
+    const serverId =
+      task?.status === 'done' ? task.serverId : task?.status === 'local' && !needsUpload ? '' : null
+    if (serverId === null) {
       return null
     }
     files.push({
       id: attachment.id,
-      serverId: task.serverId,
+      serverId,
       name: attachment.file.name,
       size: attachment.file.size,
       isImage: attachment.isImage,
@@ -146,3 +152,21 @@ export const clearAllDrafts = () => {
   }
   useDrafts.setState({ drafts: new Map() })
 }
+
+/**
+ * 切回需要服务端 file_id 的协议时，把只存在本地的草稿附件补传，
+ * 否则这些附件会一直停在 local 状态，发送按钮永远不可用。
+ */
+useProviders.subscribe(() => {
+  const provider = getActiveProvider()
+  if (provider.protocol !== 'deepseek') {
+    return
+  }
+  for (const draft of useDrafts.getState().drafts.values()) {
+    for (const attachment of draft.attachments) {
+      if (useUploads.getState().tasks[attachment.id]?.status === 'local') {
+        upload(attachment, provider.apiKey)
+      }
+    }
+  }
+})

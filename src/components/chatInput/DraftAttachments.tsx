@@ -51,7 +51,8 @@ const AttachmentItem = ({
   const t = useTranslate()
   const { image, url, link } = useFileView(item.file, item.file.name)
   const task = useUploads((state) => state.tasks[item.id] ?? UPLOADING)
-  const status = task.status
+  // local 表示当前协议不需要上传，附件已就绪
+  const status = task.status === 'local' ? 'done' : task.status
   const error = task.status === 'error' ? t(task.error.key, task.error.params) : undefined
   // 过大、格式不支持等重试无效的失败只提示原因，需删除后再发送
   const retry = task.status === 'error' && task.retryable ? onRetry : undefined

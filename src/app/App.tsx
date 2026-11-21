@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useTranslate } from '../i18n/index.js'
 import { useSettings } from '../services/settings.js'
-import { useActiveProvider } from '../services/providers.js'
+import { getCapabilities, useActiveProvider } from '../services/providers.js'
 import { refreshBalance } from '../services/balance.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
 import {
@@ -64,9 +64,11 @@ export const App = () => {
 
   // 切换提供商、改 Key 或改能力后重新查询余额；不支持余额的提供商不查询
   const provider = useActiveProvider()
+  // 协议不支持余额时（OpenAI 兼容）这里恒为 false，切换后不会发出查询
+  const balanceEnabled = getCapabilities(provider).balance
   useEffect(() => {
     void refreshBalance()
-  }, [provider.id, provider.apiKey, provider.capabilities.balance])
+  }, [provider.id, provider.apiKey, balanceEnabled])
 
   // 搜索结果面板只属于当前会话
   useEffect(closeSearchPanel, [activeId])

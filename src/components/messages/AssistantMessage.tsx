@@ -8,7 +8,12 @@ import { continueReply, regenerateReply } from '../../services/chat/store.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
 import type { AssistantMessage as AssistantMessageType } from '../../services/chat/types.js'
 import { openSettings } from '../settings/settingsDialogState.js'
-import { BUILTIN_PROVIDER_ID, useActiveProvider, useProviders } from '../../services/providers.js'
+import {
+  BUILTIN_PROVIDER_ID,
+  getCapabilities,
+  useActiveProvider,
+  useProviders,
+} from '../../services/providers.js'
 import { IconButton } from '../base/IconButton.js'
 import { Button } from '../base/Button.js'
 import { Markdown } from '../markdown/Markdown.js'
@@ -158,7 +163,7 @@ export const AssistantMessage = memo(function AssistantMessage({
           ) : null}
           <div className={clsx(styles.actions, isLast && styles.alwaysShow)}>
             {copyText ? <CopyButton text={copyText} /> : null}
-            {responseText && !refused && provider.capabilities.speech ? (
+            {responseText && !refused && getCapabilities(provider).speech ? (
               <ReadAloudButton messageId={message.id} text={responseText} />
             ) : null}
             <IconButton

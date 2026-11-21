@@ -6,6 +6,7 @@ import { classifyApiError, getUploadErrorInfo, isRetryableApiError } from './api
 import type { FilePurpose } from './api/types.js'
 import { loadFile } from './chat/db.js'
 import type { FileAttachment } from './chat/types.js'
+import { getActiveProvider } from './providers.js'
 import { ACCEPT_FILE_EXTS } from './uploadExts.js'
 
 /** 允许上传的扩展名，按扩展名白名单过滤，清单见 uploadExts.ts */
@@ -149,6 +150,8 @@ const enqueueUpload = (
  * 任务只在内存里，历史附件补传未完成时，刷新后会在下次请求前重新上传。
  */
 export type UploadTask =
+  /** 当前协议没有 Files API（OpenAI 兼容），附件留在本地，发送时内联 */
+  | { status: 'local' }
   | { status: 'uploading' }
   | { status: 'done'; serverId: string }
   | { status: 'error'; error: TranslationMessage; retryable: boolean }
@@ -174,6 +177,11 @@ export const uploadAttachment = (
   name: string,
   isImage: boolean
 ): Promise<string> => {
+  // OpenAI 兼容协议没有 Files API：不发起上传，标记为本地就绪即可
+  if (getActiveProvider().protocol !== 'deepseek') {
+    setTask(id, { status: 'local' })
+    return Promise.resolve('')
+  }
   const current = pending.get(id)
   if (current) {
     return current.promise

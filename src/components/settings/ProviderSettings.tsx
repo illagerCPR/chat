@@ -3,8 +3,11 @@ import clsx from 'clsx'
 import { useTranslate, type TranslationKey } from '../../i18n/index.js'
 import { IconTrashOutline16 } from '../base/icons.js'
 import { IconButton } from '../base/IconButton.js'
+import { Select } from '../base/Select.js'
+import { listModels } from '../../services/api/models.js'
 import {
   addProvider,
+  isCapabilitySupported,
   isValidBaseUrl,
   normalizeBaseUrl,
   removeProvider,
@@ -13,6 +16,7 @@ import {
   useProviders,
   type Provider,
   type ProviderCapabilities,
+  type ProviderProtocol,
 } from '../../services/providers.js'
 import { ApiKeyField } from './ApiKeyField.js'
 import styles from './Settings.module.css'
@@ -23,6 +27,11 @@ const CAPABILITIES: { key: keyof ProviderCapabilities; label: TranslationKey }[]
   { key: 'search', label: 'providerCapSearch' },
   { key: 'speech', label: 'providerCapSpeech' },
   { key: 'balance', label: 'providerCapBalance' },
+]
+
+const PROTOCOLS: { value: ProviderProtocol; label: TranslationKey }[] = [
+  { value: 'deepseek', label: 'providerProtocolDeepseek' },
+  { value: 'openai', label: 'providerProtocolOpenai' },
 ]
 
 const Field = ({ label, children }: { label: string; children: ReactNode }) => (
@@ -45,6 +54,10 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl)
   const [model, setModel] = useState(provider.model)
   const [urlError, setUrlError] = useState(false)
+  const [models, setModels] = useState<string[]>([])
+  const [fetchingModels, setFetchingModels] = useState(false)
+  const [modelsError, setModelsError] = useState(false)
+  const modelListId = `provider-models-${provider.id}`
 
   const commitName = () => {
     const value = name.trim()
@@ -88,6 +101,20 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
     updateProvider(provider.id, { model: value })
   }
 
+  const fetchModels = async () => {
+    setModelsError(false)
+    setFetchingModels(true)
+    try {
+      const ids = await listModels(provider)
+      setModels(ids)
+      setModelsError(ids.length === 0)
+    } catch {
+      setModelsError(true)
+    } finally {
+      setFetchingModels(false)
+    }
+  }
+
   return (
     <div className={styles.providerEditor}>
       <Field label={t('providerNameLabel')}>
@@ -99,6 +126,22 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
           onBlur={commitName}
           onKeyDown={commitOnEnter}
         />
+      </Field>
+      <Field label={t('providerProtocolLabel')}>
+        <div>
+          <Select
+            value={provider.protocol}
+            options={PROTOCOLS.map((item) => ({ value: item.value, label: t(item.label) }))}
+            disabled={provider.builtin}
+            ariaLabel={t('providerProtocolLabel')}
+            onChange={(protocol) => {
+              setModels([])
+              setModelsError(false)
+              updateProvider(provider.id, { protocol })
+            }}
+          />
+        </div>
+        <div className={styles.description}>{t('providerProtocolHint')}</div>
       </Field>
       <Field label={t('providerBaseUrlLabel')}>
         <input
@@ -114,48 +157,84 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
       </Field>
       {urlError ? <div className={styles.error}>{t('providerBaseUrlInvalid')}</div> : null}
       <Field label={t('providerModelLabel')}>
-        <input
-          className={styles.providerInput}
-          value={model}
-          placeholder={t('providerModelPlaceholder')}
-          autoComplete="off"
-          spellCheck={false}
-          onChange={(event) => setModel(event.target.value)}
-          onBlur={commitModel}
-          onKeyDown={commitOnEnter}
-        />
+        <div className={styles.providerInputRow}>
+          <input
+            className={styles.providerInput}
+            value={model}
+            list={models.length > 0 ? modelListId : undefined}
+            placeholder={t(
+              provider.protocol === 'openai'
+                ? 'providerModelPlaceholderOpenai'
+                : 'providerModelPlaceholder'
+            )}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => setModel(event.target.value)}
+            onBlur={commitModel}
+            onKeyDown={commitOnEnter}
+          />
+          <button
+            type="button"
+            className={styles.providerInlineButton}
+            disabled={fetchingModels || !isValidBaseUrl(provider.baseUrl)}
+            onClick={() => void fetchModels()}
+          >
+            {fetchingModels ? t('providerModelsLoading') : t('providerModelsFetch')}
+          </button>
+        </div>
+        {models.length > 0 ? (
+          <datalist id={modelListId}>
+            {models.map((id) => (
+              <option key={id} value={id} />
+            ))}
+          </datalist>
+        ) : null}
       </Field>
+      {modelsError ? <div className={styles.error}>{t('providerModelsFailed')}</div> : null}
       <ApiKeyField provider={provider} />
       <div className={styles.providerField}>
         <div className={styles.label}>{t('providerCapabilitiesLabel')}</div>
         <div className={styles.providerCapabilityList}>
-          {CAPABILITIES.map((item) => (
-            <label key={item.key} className={styles.providerCapability}>
-              <input
-                type="checkbox"
-                checked={provider.capabilities[item.key]}
-                onChange={(event) =>
-                  updateProvider(provider.id, {
-                    capabilities: {
-                      ...provider.capabilities,
-                      [item.key]: event.target.checked,
-                    },
-                  })
-                }
-              />
-              {t(item.label)}
-            </label>
-          ))}
+          {CAPABILITIES.map((item) => {
+            // 协议本身不具备的能力置灰：勾着也不会生效，避免造成已启用的误解
+            const supported = isCapabilitySupported(provider.protocol, item.key)
+            return (
+              <label
+                key={item.key}
+                className={clsx(
+                  styles.providerCapability,
+                  !supported && styles.providerCapabilityDisabled
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={supported && provider.capabilities[item.key]}
+                  disabled={!supported}
+                  onChange={(event) =>
+                    updateProvider(provider.id, {
+                      capabilities: {
+                        ...provider.capabilities,
+                        [item.key]: event.target.checked,
+                      },
+                    })
+                  }
+                />
+                {t(item.label)}
+              </label>
+            )
+          })}
         </div>
         <div className={styles.description}>{t('providerCapabilitiesHint')}</div>
       </div>
-      <div className={styles.description}>{t('providerEndpointHint')}</div>
+      <div className={styles.description}>
+        {t(provider.protocol === 'openai' ? 'providerEndpointHintOpenai' : 'providerEndpointHint')}
+      </div>
     </div>
   )
 }
 
 /**
- * 提供商设置：列表里选当前启用的一项，下方编辑它的地址、Key、模型与能力。
+ * 提供商设置：列表里选当前启用的一项，下方编辑它的协议、地址、Key、模型与能力。
  * 内置 DeepSeek 不能删除，自定义提供商可以随时添加与删除。
  */
 export const ProviderSettings = () => {

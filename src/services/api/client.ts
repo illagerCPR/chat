@@ -1,5 +1,10 @@
 import { translate, type TranslationMessage } from '../../i18n/index.js'
-import { getActiveProvider, normalizeBaseUrl } from '../providers.js'
+import {
+  getActiveProvider,
+  modelsUrl,
+  normalizeBaseUrl,
+  type ProviderProtocol,
+} from '../providers.js'
 import { resizeUploadImage } from '../../utils/resizeUploadImage.js'
 import { readMessageEvent } from './parseEvent.js'
 import { readServerSentEvents } from './sse.js'
@@ -50,7 +55,8 @@ const isErrorBody = (value: unknown): value is ApiErrorBody =>
   'error' in value &&
   typeof (value as ApiErrorBody).error?.message === 'string'
 
-const readErrorResponse = async (
+/** 读出非 2xx（或 200 但内容不是流）的响应体；错误体结构与 Anthropic、OpenAI 都一致 */
+export const readErrorResponse = async (
   response: Response,
   kind: 'http' | 'protocol' = 'http',
   fallback = response.statusText
@@ -95,13 +101,17 @@ const anthropicHeaders = (apiKey: string, beta: boolean): Record<string, string>
   ...(beta ? { 'anthropic-beta': FILES_BETA } : {}),
 })
 
-/** 用 GET /models 校验 API Key（不产生费用）；baseUrl 由调用方给出，用于校验尚未保存的提供商 */
+/**
+ * 用 GET /models 校验 API Key（不产生费用）。
+ * baseUrl 与协议由调用方给出，用于校验尚未保存的提供商；OpenAI 兼容端点需要补 /v1。
+ */
 export const verifyApiKey = async (
   baseUrl: string,
   apiKey: string,
+  protocol: ProviderProtocol,
   signal?: AbortSignal
 ): Promise<void> => {
-  await request(`${normalizeBaseUrl(baseUrl)}/models`, {
+  await request(modelsUrl(baseUrl, protocol), {
     method: 'GET',
     headers: bearerHeaders(apiKey),
     signal,

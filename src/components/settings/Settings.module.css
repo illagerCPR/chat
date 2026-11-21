@@ -610,6 +610,48 @@
   border-color: var(--dsw-alias-state-error-primary);
 }
 
+/* 模型 ID 与「获取模型列表」并排；输入框让出按钮宽度 */
+.providerInputRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.providerInputRow .providerInput {
+  flex: 1;
+  min-width: 0;
+}
+
+.providerInlineButton {
+  flex: none;
+  height: var(--ds-control-height-xl);
+  padding: 0 16px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 22px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  transition: background-color var(--ds-transition-duration) var(--ds-ease-in-out);
+
+  &:hover:not(:disabled) {
+    background-color: var(--dsw-alias-interactive-bg-hover);
+  }
+
+  &:focus-visible {
+    box-shadow: 0 0 0 2px var(--dsw-alias-button-primary-fill);
+  }
+
+  &:disabled {
+    color: var(--dsw-alias-label-caption);
+    cursor: not-allowed;
+  }
+}
+
 .providerCapabilityList {
   display: flex;
   flex-wrap: wrap;
@@ -630,5 +672,15 @@
     height: 16px;
     accent-color: var(--dsw-alias-brand-primary);
     cursor: pointer;
+  }
+}
+
+/* 当前协议不具备的能力：置灰且不可交互，避免误以为已经启用 */
+.providerCapabilityDisabled {
+  color: var(--dsw-alias-label-caption);
+  cursor: default;
+
+  input {
+    cursor: default;
   }
 }

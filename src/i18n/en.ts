@@ -196,6 +196,10 @@ export const en = {
   providerBaseUrlInvalid: 'Enter a valid http(s) URL',
   providerModelLabel: 'Model ID',
   providerModelPlaceholder: 'e.g. deepseek-flash',
+  providerModelPlaceholderOpenai: 'e.g. gpt-4o-mini',
+  providerModelsFetch: 'Fetch models',
+  providerModelsLoading: 'Fetching…',
+  providerModelsFailed: 'Could not fetch the model list; check the URL and API key',
   providerApiKeyLabel: 'API Key',
   providerApiKeyPlaceholder: 'Leave empty if no auth is needed',
   providerApiKeyOptional: 'Leave empty when this endpoint requires no API key',
@@ -208,8 +212,17 @@ export const en = {
   providerCapBalance: 'Balance',
   providerCapabilitiesHint:
     'Only enable what the endpoint supports; unchecked features are left out of requests.',
+  providerProtocolLabel: 'API protocol',
+  providerProtocolDeepseek: 'DeepSeek compatible',
+  providerProtocolOpenai: 'OpenAI compatible',
+  providerProtocolHint:
+    'OpenAI compatibility uses /v1/chat/completions and covers chat plus inline images only; web search, voice and balance are unavailable. The built-in provider always uses the DeepSeek protocol.',
   providerEndpointHint:
     'The endpoint must implement the DeepSeek Anthropic-compatible API and allow cross-origin requests; an HTTPS page cannot call http:// addresses.',
+  providerEndpointHintOpenai:
+    'Enter either the root URL or a /v1 URL and /v1/chat/completions is filled in automatically. The endpoint must allow cross-origin requests, and an HTTPS page cannot call http:// addresses.',
+  openAiDocumentUnsupported:
+    'OpenAI-compatible endpoints do not accept document attachments yet. Attach images instead, or switch to a DeepSeek provider.',
   settingsLocaleZhCN: 'Simplified Chinese',
   settingsLocaleEnUS: 'English',
 } satisfies Record<keyof typeof zh, string>

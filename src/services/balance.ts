@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { getBalance, type Balance, type BalanceInfo } from './api/balance.js'
-import { getActiveProvider } from './providers.js'
+import { getActiveProvider, getCapabilities } from './providers.js'
 
 /**
  * 账户余额：页面打开时查一次，设置里可手动刷新，每次回复结束后静默更新。
@@ -31,7 +31,7 @@ const reset = () => {
 export const refreshBalance = async (quiet = false): Promise<void> => {
   const provider = getActiveProvider()
   // 余额是 DeepSeek 专有接口，自定义提供商未声明该能力、或没有 Key 时不查询
-  if (!provider.capabilities.balance || provider.apiKey === '') {
+  if (!getCapabilities(provider).balance || provider.apiKey === '') {
     reset()
     return
   }

@@ -2,9 +2,10 @@ import { create } from 'zustand'
 import { createId } from '../utils/id.js'
 
 /**
- * 提供商是一套完整的 API 配置（地址、Key、模型与能力）。
+ * 提供商是一套完整的 API 配置（地址、Key、模型、协议与能力）。
  * 内置的 DeepSeek 不可删除，可改地址与模型（指向自建反代时仍算官方）。
- * 自定义提供商指向任何实现 DeepSeek 协议（Anthropic 兼容格式）的端点。
+ * 自定义提供商可以指向任何实现 DeepSeek 协议（Anthropic 兼容格式）或 OpenAI 兼容协议
+ * （/v1/chat/completions）的端点。
  */
 
 /** 构建期注入的 API 地址，内置 DeepSeek 的默认值 */
@@ -15,12 +16,16 @@ export const BUILTIN_PROVIDER_ID = 'deepseek'
 /** 内置 DeepSeek 的默认模型 */
 export const BUILTIN_MODEL = 'deepseek-flash'
 
-/** 协议字段：目前只实现 DeepSeek 的 Anthropic 兼容接口，OpenAI 兼容为后续预留 */
-export type ProviderProtocol = 'deepseek'
+/**
+ * 协议决定请求路径与请求体形状：
+ * - deepseek：DeepSeek 的 Anthropic 兼容接口，支持附件、搜索、语音与余额；
+ * - openai：/v1/chat/completions，只支持聊天与图片内联，其余能力由协议表限定。
+ */
+export type ProviderProtocol = 'deepseek' | 'openai'
 
 /** 端点实际支持的能力，界面据此显隐；聊天恒可用，不设开关 */
 export type ProviderCapabilities = {
-  /** 附件：图片与文档经 Anthropic Files API 上传 */
+  /** 附件：DeepSeek 经 Files API 上传；OpenAI 兼容协议改为图片内联 */
   files: boolean
   /** 深度思考 */
   thinking: boolean
@@ -72,6 +77,15 @@ const CUSTOM_CAPABILITIES: ProviderCapabilities = {
   search: false,
   speech: false,
   balance: false,
+}
+
+/**
+ * 各协议真正支持的能力。OpenAI 兼容协议没有 Files API、server tools、余额与
+ * DeepSeek 语音接口，这些能力即使声明的存档里是开着的也不生效。
+ */
+const PROTOCOL_CAPABILITIES: Record<ProviderProtocol, ProviderCapabilities> = {
+  deepseek: FULL_CAPABILITIES,
+  openai: { files: true, thinking: true, search: false, speech: false, balance: false },
 }
 
 const readStorage = (key: string) => {
@@ -126,7 +140,9 @@ const readProvider = (value: unknown): Provider | null => {
     baseUrl: value.baseUrl,
     apiKey: typeof value.apiKey === 'string' ? value.apiKey : '',
     model: value.model,
-    protocol: 'deepseek',
+    // 0.3.0 的存档没有协议字段；内置项始终按 DeepSeek 协议
+    protocol:
+      value.id !== BUILTIN_PROVIDER_ID && value.protocol === 'openai' ? 'openai' : 'deepseek',
     capabilities: readCapabilities(value.capabilities),
   }
 }
@@ -207,19 +223,39 @@ export const useActiveProvider = (): Provider =>
       state.providers.find((provider) => provider.id === state.activeId) ?? state.providers[0]
   )
 
+/** 按协议收窄后的能力：存档里的勾选值再与协议支持的能力取交集 */
+export const getCapabilities = (provider: Provider): ProviderCapabilities => {
+  const supported = PROTOCOL_CAPABILITIES[provider.protocol] ?? PROTOCOL_CAPABILITIES.deepseek
+  return {
+    files: provider.capabilities.files && supported.files,
+    thinking: provider.capabilities.thinking && supported.thinking,
+    search: provider.capabilities.search && supported.search,
+    speech: provider.capabilities.speech && supported.speech,
+    balance: provider.capabilities.balance && supported.balance,
+  }
+}
+
+/** 该协议是否支持某项能力，设置页据此禁用勾选框 */
+export const isCapabilitySupported = (
+  protocol: ProviderProtocol,
+  key: keyof ProviderCapabilities
+): boolean => (PROTOCOL_CAPABILITIES[protocol] ?? PROTOCOL_CAPABILITIES.deepseek)[key]
+
 export const setActiveProvider = (id: string) => {
   if (useProviders.getState().providers.some((provider) => provider.id === id)) {
     commit({ activeId: id })
   }
 }
 
-type ProviderPatch = Partial<Omit<Provider, 'id' | 'builtin' | 'protocol'>>
+type ProviderPatch = Partial<Omit<Provider, 'id' | 'builtin'>>
 
 export const updateProvider = (id: string, patch: ProviderPatch) => {
+  // 内置项固定 DeepSeek 协议：换成 OpenAI 兼容会丢掉身份提示、标题与搜索工具
+  const next = id === BUILTIN_PROVIDER_ID ? { ...patch, protocol: 'deepseek' as const } : patch
   commit({
     providers: useProviders
       .getState()
-      .providers.map((provider) => (provider.id === id ? { ...provider, ...patch } : provider)),
+      .providers.map((provider) => (provider.id === id ? { ...provider, ...next } : provider)),
   })
 }
 
@@ -276,6 +312,26 @@ export const isValidBaseUrl = (value: string): boolean => {
     return false
   }
 }
+
+/**
+ * OpenAI 兼容接口的根地址。`https://x`、`https://x/v1`、`https://x/v1/chat/completions`
+ * 三种常见填法都归一到 `https://x/v1`；已经带版本段（v1、v1beta 等）的路径不再重复追加。
+ */
+export const openAiBase = (baseUrl: string): string => {
+  const base = normalizeBaseUrl(baseUrl).replace(/\/(?:chat\/)?completions$/i, '')
+  if (base === '') {
+    return ''
+  }
+  try {
+    return /\/v\d+[a-z0-9]*$/i.test(new URL(base).pathname) ? base : `${base}/v1`
+  } catch {
+    return `${base}/v1`
+  }
+}
+
+/** 拉取模型列表、校验 Key 的地址：两种协议的版本段规则不同 */
+export const modelsUrl = (baseUrl: string, protocol: ProviderProtocol): string =>
+  `${protocol === 'openai' ? openAiBase(baseUrl) : normalizeBaseUrl(baseUrl)}/models`
 
 /** 可以发起请求：地址有效，且内置项已填 Key（自定义端点允许无鉴权） */
 export const isProviderReady = (provider: Provider): boolean =>

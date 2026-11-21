@@ -88,16 +88,17 @@ pnpm build
 
 ## 提供商
 
-设置 → 提供商 里维护一组 API 配置。内置的 DeepSeek 始终存在，可以改成指向你自己的反向代理；新增的自定义提供商用于连接任何实现 DeepSeek Anthropic 兼容接口（`/anthropic/v1/messages`、`/anthropic/v1/files`、`/models`）的端点。
+设置 → 提供商 里维护一组 API 配置。内置的 DeepSeek 始终存在，且固定使用 DeepSeek 的 Anthropic 兼容接口（`/anthropic/v1/messages`、`/anthropic/v1/files`、`/models`），可以改成指向你自己的反向代理；新增的自定义提供商可以从两种协议里选一种：
 
-每条提供商有独立的地址、API Key、模型 ID，以及附件、深度思考、联网搜索、语音、余额五个能力开关。只有开启的能力会出现在界面上，未开启的能力不会写进请求体，因此只实现了部分接口的端点也能正常聊天。
+- **DeepSeek 兼容**：Anthropic 兼容接口，支持附件、联网搜索、语音与余额。
+- **OpenAI 兼容**：`POST /v1/chat/completions`，流式返回。地址填根地址或 `/v1` 地址均可，客户端会自动补全 `/v1/chat/completions`。只支持聊天：图片以 data URL 内联发送，端点返回的思考内容（`reasoning_content` 或 `reasoning`）会正常展示，联网搜索、语音与余额不可用；PDF、Word 这类文档附件无法通过该协议发送。「获取模型列表」会用 `GET /v1/models` 填充模型 ID。
+
+每条提供商有独立的地址、API Key、模型 ID，以及附件、深度思考、联网搜索、语音、余额五个能力开关。只有开启的能力会出现在界面上，未开启的能力不会写进请求体，因此只实现了部分接口的端点也能正常聊天。会话标题由 DeepSeek 接口生成，OpenAI 兼容提供商下的对话会一直显示「新对话」，直到你手动改名。
 
 浏览器直连端点有两条硬约束：
 
 - 端点必须允许跨域请求。
 - HTTPS 页面不能访问 `http://` 地址。本地模型请套一层 HTTPS 反向代理，或改用 HTTP 打开本页面。
-
-暂不支持 OpenAI 兼容接口（`/v1/chat/completions`）。
 
 ## 数据
 
