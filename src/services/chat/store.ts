@@ -35,9 +35,11 @@ import {
   applyEvent,
   canContinueReply,
   getContextRounds,
+  getReplyText,
   settleReply,
   toRequestMessages,
 } from './reply.js'
+import { requestSessionTitle } from './sessionTitle.js'
 import {
   toSessionSummary,
   type AssistantMessage,
@@ -116,6 +118,10 @@ const createRequestBody = (
 
 /** 允许自动补标题的请求；手动重命名后取消本轮标题写入，包含主动清空标题的情况。 */
 const titleRequests = new Set<AbortController>()
+/** 非内置提供商的自动标题请求；手动重命名或删除会话时中止，避免晚到的结果覆盖用户输入 */
+const titleTasks = new Map<string, AbortController>()
+/** 起名是附加动作，端点长时间无响应时不能一直占着连接 */
+const TITLE_TIMEOUT_MS = 30_000
 
 type ChatState = {
   ready: boolean
@@ -526,6 +532,9 @@ export const renameSession = (id: string, title: string) => {
   if (controller) {
     titleRequests.delete(controller)
   }
+  // 用户已经自己命名，正在路上的自动标题不能再覆盖它
+  titleTasks.get(id)?.abort()
+  titleTasks.delete(id)
   if (getSession(id)) {
     updateSession(id, (session) => ({ ...session, title }))
     persist(id)
@@ -535,6 +544,35 @@ export const renameSession = (id: string, title: string) => {
         session.id === id ? { ...session, title } : session
       ),
     }))
+    void db.renameSession(id, title).catch(db.reportStorageError('rename session'))
+  }
+}
+
+/**
+ * 写回模型起的标题。会话已不在缓存时只改摘要并落库，不为了一行标题把整段对话读回内存；
+ * 用户在这期间手动改过名字的（标题非空）保持用户的选择，包含主动清空标题的情况。
+ */
+const applyAutoTitle = (id: string, title: string) => {
+  if (get().importingHistory || deletingSessions.has(id)) {
+    return
+  }
+  if (getSession(id)) {
+    updateSession(id, (session) => (session.title ? session : { ...session, title }))
+    persist(id)
+    return
+  }
+  let changed = false
+  set((state) => {
+    const sessions = state.sessions.map((summary) => {
+      if (summary.id !== id || summary.title !== '') {
+        return summary
+      }
+      changed = true
+      return { ...summary, title }
+    })
+    return changed ? { sessions } : state
+  })
+  if (changed) {
     void db.renameSession(id, title).catch(db.reportStorageError('rename session'))
   }
 }
@@ -557,6 +595,8 @@ const removeSessionData = async (id: string): Promise<boolean> => {
   deletingSessions.add(id)
   try {
     getStreamController(id)?.abort()
+    titleTasks.get(id)?.abort()
+    titleTasks.delete(id)
     // 等本会话的流收尾，避免删除之后又被收尾保存写回来。
     await waitForIdle(id)
     if (epoch !== historyEpoch) {
@@ -1080,18 +1120,70 @@ const runSearchPrepass = async (
 }
 
 /**
+ * 首轮回答结束后补一个标题：内置 DeepSeek 由主请求的 title 扩展字段生成，这里只处理其余形态。
+ * 起名在后台进行，失败静默，会话保持「未命名对话」；用户随后手动改名会中止它。
+ */
+const scheduleAutoTitle = (
+  sessionId: string,
+  provider: Provider,
+  request: Request,
+  reply: AssistantMessage
+) => {
+  // 只有首轮才起名：后续轮次可能已经跑题，半路换个名字反而误导
+  if (provider.builtin || request.history.length > 0) {
+    return
+  }
+  // 报错或没有正文的回复不起名，名字会与内容对不上
+  if (reply.status !== 'done' && reply.status !== 'stopped') {
+    return
+  }
+  if (get().importingHistory) {
+    return
+  }
+  const summary = get().sessions.find((session) => session.id === sessionId)
+  if (!summary || summary.title !== '') {
+    return
+  }
+  const answer = getReplyText(reply)
+  if (answer.trim() === '') {
+    return
+  }
+  const controller = new AbortController()
+  titleTasks.get(sessionId)?.abort()
+  titleTasks.set(sessionId, controller)
+  const timer = setTimeout(() => controller.abort(), TITLE_TIMEOUT_MS)
+  void requestSessionTitle(provider, request.question.content, answer, controller.signal)
+    .then((title) => {
+      if (!controller.signal.aborted && title !== '') {
+        applyAutoTitle(sessionId, title)
+      }
+    })
+    .catch(() => {
+      // 静默：起名失败不影响本轮对话，用户可手动重命名
+    })
+    .finally(() => {
+      clearTimeout(timer)
+      if (titleTasks.get(sessionId) === controller) {
+        titleTasks.delete(sessionId)
+      }
+    })
+}
+
+/**
  * 请求并消费流：先补齐附件的 serverId，再发请求；流式增量按动画帧刷新内存，完成、失败或停止后落盘。
  * 补传失败时回复记为 upload 错误，可重试。
  * 服务端判定 file_id 失效时重新补传后重发，退避重试且次数有上限，超过则按原始报错收尾。
  */
 const streamReply = async (sessionId: string, initial: AssistantMessage, request: Request) => {
   const controller = new AbortController()
-  // 自动标题是 DeepSeek 的扩展字段，其他端点发不出去，也就不必登记
-  if (getProviderShape(getActiveProvider()) === 'deepseek' && !getSession(sessionId)?.title) {
+  // 服务端自动标题是内置 DeepSeek 的扩展字段，其他端点发不出去，改由 scheduleAutoTitle 另发请求
+  if (getActiveProvider().builtin && !getSession(sessionId)?.title) {
     titleRequests.add(controller)
   }
   set((state) => ({ streaming: { ...state.streaming, [sessionId]: controller } }))
   let reply = initial
+  /** 本轮实际使用的提供商：起名要发给它，而不是流结束后可能被切走的当前提供商 */
+  let usedProvider: Provider | undefined
   /** 官方检索预取只做一次，重试发送时复用结果 */
   let searchContext: string | undefined
   let searched = false
@@ -1120,6 +1212,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         persist(sessionId)
         const provider = getActiveProvider()
         const shape = getProviderShape(provider)
+        usedProvider = provider
         let events: AsyncGenerator<MessageStreamEvent>
         if (shape === 'openai') {
           // 与 Anthropic 形态一致：搜索只在开启时预取一次，重试复用已有结果
@@ -1267,6 +1360,9 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       ),
     }))
     persist(sessionId)
+    if (usedProvider) {
+      scheduleAutoTitle(sessionId, usedProvider, request, reply)
+    }
     // 一轮对话结束，余额可能已经变化；静默更新，不闪加载态也不报错
     void refreshBalance(true)
   }
