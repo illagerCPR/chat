@@ -23,6 +23,7 @@ import {
 } from '../../services/providers.js'
 import { ApiKeyField } from './ApiKeyField.js'
 import { OfficialKeyField } from './OfficialKeyField.js'
+import { SystemPromptField } from './SystemPromptField.js'
 import styles from './Settings.module.css'
 
 const CAPABILITIES: { key: keyof ProviderCapabilities; label: TranslationKey }[] = [
@@ -215,6 +216,7 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
       </Field>
       {modelsError ? <div className={styles.error}>{t('providerModelsFailed')}</div> : null}
       <ApiKeyField provider={provider} />
+      <SystemPromptField provider={provider} />
       <div className={styles.providerField}>
         <div className={styles.label}>{t('providerCapabilitiesLabel')}</div>
         <div className={styles.providerCapabilityList}>

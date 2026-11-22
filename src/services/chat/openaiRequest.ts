@@ -1,6 +1,6 @@
 import { ApiError } from '../api/client.js'
 import type { OpenAiChatRequest, OpenAiContentPart, OpenAiMessage } from '../api/openai.js'
-import type { Provider } from '../providers.js'
+import { resolveSystemPrompt, type Provider } from '../providers.js'
 import { resizeUploadImage } from '../../utils/resizeUploadImage.js'
 import { getContextRounds, getReplyText } from './reply.js'
 import type { FileAttachment, Message, UserMessage } from './types.js'
@@ -61,7 +61,7 @@ const toContent = (
 export type OpenAiRequestContext = {
   history: Message[]
   question: UserMessage
-  /** 官方检索结果的摘要；有值时作为首条 system 消息插入 */
+  /** 官方检索结果的摘要；与系统提示词合成首条 system 消息 */
   context?: string
 }
 
@@ -121,9 +121,13 @@ export const createOpenAiRequest = async (
       messages.push({ role: 'assistant', content: answer })
     }
   }
-  // 检索结果放在最前面：端点看到的是一段「本轮可用资料」，历史轮次里不会重复出现
-  if (context) {
-    messages.unshift({ role: 'system', content: context })
+  // 系统提示词与检索结果合成一条 system 消息放在最前面：端点看到的是一段「角色设定 + 本轮资料」，
+  // 历史轮次里不会重复出现；用户把提示词清空时只发检索结果，两者都没有就不带 system
+  const system = [resolveSystemPrompt(provider), context ?? '']
+    .filter((part) => part !== '')
+    .join('\n\n')
+  if (system !== '') {
+    messages.unshift({ role: 'system', content: system })
   }
   messages.push({ role: 'user', content: toContent(question.content, questionImages) ?? '' })
 

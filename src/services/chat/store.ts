@@ -16,6 +16,7 @@ import {
   getActiveProvider,
   getCapabilities,
   getProviderShape,
+  resolveSystemPrompt,
   type Provider,
 } from '../providers.js'
 import { useSettings } from '../settings.js'
@@ -50,8 +51,6 @@ import {
   type UserMessage,
 } from './types.js'
 
-/** 内置 DeepSeek 的助手身份说明；自定义提供商不注入，避免把其他模型说成 DeepSeek */
-const SYSTEM_PROMPT = '该助手为DeepSeek，由深度求索公司创造。'
 /** 保留最近打开的详情；当前会话、生成中及尚未成功保存的会话不淘汰。 */
 const SESSION_CACHE_LIMIT = 5
 /** 安全审核固定开启，所有请求都走扩展模式 */
@@ -78,9 +77,16 @@ const ANTHROPIC_MAX_TOKENS = 8192
 const ANTHROPIC_THINKING_BUDGET = 2048
 
 /**
+ * 系统提示词与官方检索的上下文合成一段 system：部分网关只认一条，用空行分隔更像同一段说明。
+ * 用户把提示词清空时这里为空，请求里就不带 system。
+ */
+const mergeSystem = (provider: Provider, context?: string): string =>
+  [resolveSystemPrompt(provider), context ?? ''].filter((part) => part !== '').join('\n\n')
+
+/**
  * 按提供商能力与端点形态拼请求体：不支持的能力对应的扩展字段整个省略，避免严格校验的网关直接报错。
- * - DeepSeek 形态：助手身份说明、自动标题、安全审核与 server tools 都是定制字段；
- * - 标准 Anthropic 形态：只发文档要求的字段，联网检索的结果以 system 上下文注入。
+ * - DeepSeek 形态：系统提示词、自动标题、安全审核与 server tools 都是定制字段；
+ * - 标准 Anthropic 形态：只发文档要求的字段，系统提示词与联网检索的结果一起以 system 注入。
  */
 const createRequestBody = (
   provider: Provider,
@@ -91,11 +97,12 @@ const createRequestBody = (
 ): CreateMessageRequest => {
   const capabilities = getCapabilities(provider)
   const model = initial.model ?? provider.model
+  const system = mergeSystem(provider, context)
   if (getProviderShape(provider) === 'anthropic') {
     return {
       model,
       max_tokens: ANTHROPIC_MAX_TOKENS,
-      ...(context ? { system: context } : {}),
+      ...(system !== '' ? { system } : {}),
       messages,
       ...(capabilities.thinking && initial.thinking
         ? { thinking: { type: 'enabled', budget_tokens: ANTHROPIC_THINKING_BUDGET } }
@@ -104,7 +111,7 @@ const createRequestBody = (
   }
   return {
     model,
-    ...(provider.builtin ? { system: SYSTEM_PROMPT } : {}),
+    ...(system !== '' ? { system } : {}),
     messages,
     ...(capabilities.thinking
       ? { thinking: { type: initial.thinking ? 'enabled' : 'disabled' } }

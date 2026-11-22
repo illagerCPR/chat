@@ -84,18 +84,25 @@ The output is written to `dist/`. Deploy it to a static web server or open `dist
 - Markdown, syntax highlighting, KaTeX math, and Mermaid diagrams.
 - Simplified Chinese and English, light and dark themes, mobile layouts, location settings, and chat history import and export.
 - Optional server-side storage: conversations and attachments persist in a SQLite data volume, with optional password protection.
-- Custom providers: point the app at DeepSeek-compatible, standard Anthropic Messages, or OpenAI-compatible endpoints, with per-provider keys, models, and capability switches; web search, voice, and balance always use the official DeepSeek service, so they work on third-party endpoints too.
+- Custom providers: point the app at DeepSeek-compatible, standard Anthropic Messages, or OpenAI-compatible endpoints, with per-provider keys, models, system prompts, and capability switches; web search, voice, and balance always use the official DeepSeek service, so they work on third-party endpoints too.
 
 ## Providers
 
-Settings → Providers holds a list of API configurations. The built-in DeepSeek entry is always present, with its URL, model ID, and protocol pinned to the official configuration (`/anthropic/v1/messages`, `/anthropic/v1/files`, `/models`); only its API key and capability switches can change. Additional entries can use either protocol:
+Settings → Providers holds a list of API configurations. The built-in DeepSeek entry is always present, with its URL, model ID, and protocol pinned to the official configuration (`/anthropic/v1/messages`, `/anthropic/v1/files`, `/models`); only its API key, system prompt, and capability switches can change. Additional entries can use either protocol:
 
 - **DeepSeek compatible** — the URL decides which Anthropic-compatible shape is used, and the editor shows the resulting request URL.
   - A site root or a path containing `/anthropic` (e.g. `https://api.deepseek.com`, `…/anthropic/v1`) uses the DeepSeek extensions: attachments work, and web search plus link reading run through DeepSeek server tools on the endpoint itself.
   - A versioned path (e.g. `https://api.example.com/provider/v1`) or a pasted full endpoint (`…/v1/messages`, `…/v1/message`) uses the standard Anthropic Messages API. Attachments are unavailable and web search falls back to the official retrieval described below.
 - **OpenAI compatible** — `POST /v1/chat/completions` with streaming replies. Enter either the root URL or a `/v1` URL; `/v1/chat/completions` is filled in automatically. Chat and inline images are supported: images are sent as data URLs, and reasoning returned by the endpoint (`reasoning_content` or `reasoning`) is displayed. Web search runs through the official retrieval and its result is injected as the first `system` message; voice and balance also use the official service (see below). Document attachments (PDF, Word) cannot be sent over this protocol. **Fetch models** fills the model ID from `GET /v1/models`.
 
-Each provider has its own base URL, API key, model ID, and capability switches for attachments, deep thinking, web search, voice, and balance. Only enabled capabilities appear in the interface, and disabled ones are left out of request bodies, so an endpoint that implements a subset of the API keeps working.
+Each provider has its own base URL, API key, model ID, system prompt, and capability switches for attachments, deep thinking, web search, voice, and balance. Only enabled capabilities appear in the interface, and disabled ones are left out of request bodies, so an endpoint that implements a subset of the API keeps working.
+
+### System prompt
+
+The system prompt is stored per provider, edited under **API Key**, and saved when the field loses focus. The default depends on the provider: the built-in DeepSeek uses "该助手为DeepSeek，由深度求索公司创造。", while every other endpoint defaults to empty, meaning no `system` is sent. The built-in entry can be edited too; **Restore default** brings its default back.
+
+- Saving an empty prompt means no system prompt is sent at all, which differs from using the default: only the latter follows later changes to the default text.
+- The prompt is sent with every request; with web search enabled on a third-party endpoint the retrieval summary is appended to the same `system` block (prompt first, separated by a blank line). OpenAI-compatible endpoints still carry a single `system` message, so gateways that accept only one keep working.
 
 ### Official capabilities
 

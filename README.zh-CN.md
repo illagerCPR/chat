@@ -84,18 +84,25 @@ pnpm build
 - Markdown、代码高亮、KaTeX 公式和 Mermaid 图表。
 - 简体中文与英文、浅色与深色主题、移动端布局、位置设置、历史导入导出。
 - 可选的服务器端存储：对话与附件持久化到 SQLite 数据卷，可选用访问口令。
-- 自定义提供商：可指向 DeepSeek 兼容、标准 Anthropic Messages 或 OpenAI 兼容端点，每条配置有自己的 Key、模型与能力开关；联网搜索、语音与余额固定使用 DeepSeek 官方服务，因此第三方端点上也能用这三项。
+- 自定义提供商：可指向 DeepSeek 兼容、标准 Anthropic Messages 或 OpenAI 兼容端点，每条配置有自己的 Key、模型、系统提示词与能力开关；联网搜索、语音与余额固定使用 DeepSeek 官方服务，因此第三方端点上也能用这三项。
 
 ## 提供商
 
-设置 → 提供商 里维护一组 API 配置。内置的 DeepSeek 始终存在，地址、模型 ID 与协议固定为官方配置（`/anthropic/v1/messages`、`/anthropic/v1/files`、`/models`），只能修改 API Key 与能力开关。新增的自定义提供商可以从两种协议里选一种：
+设置 → 提供商 里维护一组 API 配置。内置的 DeepSeek 始终存在，地址、模型 ID 与协议固定为官方配置（`/anthropic/v1/messages`、`/anthropic/v1/files`、`/models`），只能修改 API Key、系统提示词与能力开关。新增的自定义提供商可以从两种协议里选一种：
 
 - **DeepSeek 兼容**：按地址自动识别是哪一种 Anthropic 兼容接口，设置页地址下方会显示实际请求地址。
   - 站点根地址或带 `/anthropic` 的地址（如 `https://api.deepseek.com`、`…/anthropic/v1`）：按 DeepSeek 的扩展接口调用，支持附件，联网搜索与链接阅读由端点自己用 DeepSeek 的 server tools 完成。
   - 带版本段的地址（如 `https://api.example.com/provider/v1`）或直接粘贴的整条端点（`…/v1/messages`、`…/v1/message`）：按标准 Anthropic Messages API 调用，附件不可用，联网搜索改由官方检索完成（见下文）。
 - **OpenAI 兼容**：`POST /v1/chat/completions`，流式返回。地址填根地址或 `/v1` 地址均可，客户端会自动补全 `/v1/chat/completions`。聊天与图片内联都支持：图片以 data URL 发送，端点返回的思考内容（`reasoning_content` 或 `reasoning`）会正常展示。联网搜索由官方检索完成，结果作为首条 `system` 消息注入；语音与余额同样使用官方服务（见下文）。PDF、Word 这类文档附件无法通过该协议发送。「获取模型列表」会用 `GET /v1/models` 填充模型 ID。
 
-每条提供商有独立的地址、API Key、模型 ID，以及附件、深度思考、联网搜索、语音、余额五个能力开关。只有开启的能力会出现在界面上，未开启的能力不会写进请求体，因此只实现了部分接口的端点也能正常聊天。
+每条提供商有独立的地址、API Key、模型 ID、系统提示词，以及附件、深度思考、联网搜索、语音、余额五个能力开关。只有开启的能力会出现在界面上，未开启的能力不会写进请求体，因此只实现了部分接口的端点也能正常聊天。
+
+### 系统提示词
+
+每条提供商的系统提示词单独保存，在「API Key」下方编辑，输入框失焦即保存。默认值按提供商区分：内置 DeepSeek 是「该助手为DeepSeek，由深度求索公司创造。」，其他端点为空——空默认值表示请求里不带 `system`。内置项同样可以改，改过之后右上角的「恢复默认」回到该提供商的默认值。
+
+- 清空并保存表示明确不发送系统提示词，与「使用默认值」是两种状态：只有后者会跟随默认文案的变化。
+- 系统提示词每轮请求都会带上；用第三方端点开启联网搜索时，检索结果会与它拼成同一段 `system`（提示词在前，空行分隔），OpenAI 兼容形态也仍然只有一条 `system` 消息，避免部分网关只认一条。
 
 ### 官方能力
 

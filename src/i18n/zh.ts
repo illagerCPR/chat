@@ -197,6 +197,12 @@ export const zh = {
   providerApiKeyPlaceholder: '留空表示无需鉴权',
   providerApiKeyOptional: '留空表示该端点无需鉴权',
   providerBaseUrlFirst: '请先在上方填写有效的 API 地址',
+  providerSystemPromptLabel: '系统提示词',
+  providerSystemPromptDefault: '默认',
+  providerSystemPromptCustom: '已自定义',
+  providerSystemPromptPlaceholder: '未设置：请求不发送系统提示词',
+  providerSystemPromptHint: '每次请求都会带上这段内容；清空并保存表示不发送系统提示词。',
+  providerSystemPromptReset: '恢复默认',
   providerCapabilitiesLabel: '支持的功能',
   providerCapFiles: '附件',
   providerCapThinking: '深度思考',
@@ -207,7 +213,7 @@ export const zh = {
   providerCapabilitiesOfficialHint:
     '勾选项超出端点本身的能力：联网搜索、语音与余额由 DeepSeek 官方服务提供，需要在下方配置官方能力 Key。',
   providerBuiltinLocked:
-    '内置 DeepSeek 固定使用官方地址、模型与协议，只能修改 API Key 与支持的功能。',
+    '内置 DeepSeek 固定使用官方地址、模型与协议，只能修改 API Key、系统提示词与支持的功能。',
   providerProtocolLabel: '接口协议',
   providerProtocolDeepseek: 'DeepSeek 兼容',
   providerProtocolOpenai: 'OpenAI 兼容',

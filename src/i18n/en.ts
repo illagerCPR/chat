@@ -205,6 +205,13 @@ export const en = {
   providerApiKeyPlaceholder: 'Leave empty if no auth is needed',
   providerApiKeyOptional: 'Leave empty when this endpoint requires no API key',
   providerBaseUrlFirst: 'Fill in a valid API base URL above first',
+  providerSystemPromptLabel: 'System prompt',
+  providerSystemPromptDefault: 'Default',
+  providerSystemPromptCustom: 'Custom',
+  providerSystemPromptPlaceholder: 'Not set: requests carry no system prompt',
+  providerSystemPromptHint:
+    'Sent with every request; save it empty to send no system prompt at all.',
+  providerSystemPromptReset: 'Restore default',
   providerCapabilitiesLabel: 'Supported features',
   providerCapFiles: 'Attachments',
   providerCapThinking: 'Reasoning',
@@ -216,7 +223,7 @@ export const en = {
   providerCapabilitiesOfficialHint:
     'Web search, voice and balance come from the official DeepSeek service rather than the endpoint; configure the official API key below to use them.',
   providerBuiltinLocked:
-    'The built-in DeepSeek provider always uses the official URL, model and protocol; only its API key and supported features can change.',
+    'The built-in DeepSeek provider always uses the official URL, model and protocol; only its API key, system prompt and supported features can change.',
   providerProtocolLabel: 'API protocol',
   providerProtocolDeepseek: 'DeepSeek compatible',
   providerProtocolOpenai: 'OpenAI compatible',

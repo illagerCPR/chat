@@ -3,7 +3,7 @@ import { createId } from '../utils/id.js'
 
 /**
  * 提供商是一套完整的 API 配置（地址、Key、模型、协议与能力）。
- * 内置的 DeepSeek 不可删除，可改地址与模型（指向自建反代时仍算官方）。
+ * 内置的 DeepSeek 不可删除，名称、地址、模型与协议固定，只能改 Key、系统提示词与能力。
  * 自定义提供商可以指向任何实现 DeepSeek 协议（Anthropic 兼容格式）或 OpenAI 兼容协议
  * （/v1/chat/completions）的端点。
  */
@@ -41,7 +41,7 @@ export type Provider = {
   /** 内置固定为 deepseek，自定义为 p- 前缀的随机 id */
   id: string
   name: string
-  /** 内置项不可删除，名称、地址、模型与协议都固定，只能改 Key 与能力 */
+  /** 内置项不可删除，名称、地址、模型与协议都固定，只能改 Key、系统提示词与能力 */
   builtin: boolean
   /** API 根地址，不含末尾斜杠；内置项固定为构建期 API_ORIGIN */
   baseUrl: string
@@ -51,6 +51,11 @@ export type Provider = {
   model: string
   protocol: ProviderProtocol
   capabilities: ProviderCapabilities
+  /**
+   * 系统提示词：null 表示用默认值（内置 DeepSeek 为身份说明，自定义端点为空），
+   * 空串表示用户明确选择不发送 system。
+   */
+  systemPrompt: string | null
 }
 
 export type ProvidersState = {
@@ -82,9 +87,22 @@ export type ResolvedEndpoint = {
   models: string
 }
 
+/** 内置 DeepSeek 的系统提示词默认值；自定义端点默认为空，即请求里不带 system */
+const BUILTIN_SYSTEM_PROMPT = '该助手为DeepSeek，由深度求索公司创造。'
+
+/** 默认值按提供商区分：只有内置 DeepSeek 带身份说明 */
+export const defaultSystemPrompt = (provider: Provider): string =>
+  provider.builtin ? BUILTIN_SYSTEM_PROMPT : ''
+
+/** 本轮实际发送的系统提示词；存档为 null 时取默认值，空串表示明确不发送 */
+export const resolveSystemPrompt = (provider: Provider): string =>
+  provider.systemPrompt ?? defaultSystemPrompt(provider)
+
 const STORAGE_KEY = 'chat-demo:providers'
 /** 存档结构版本：低于当前版本的存档在加载时做一次性迁移 */
-const STORAGE_SCHEMA = 3
+const STORAGE_SCHEMA = 4
+/** 0.3.3 打开 OpenAI 端点三项能力的存档版本；低于它的存档才做那次迁移 */
+const SCHEMA_OPENAI_CAPABILITIES = 3
 /** 0.2.x 把 API Key 单独存在这个键，升级后迁移进内置提供商 */
 const LEGACY_API_KEY = 'chat-demo:api-key'
 
@@ -185,6 +203,8 @@ const readProvider = (value: unknown): Provider | null => {
     // 0.3.0 的存档没有协议字段；内置项始终按 DeepSeek 协议
     protocol: builtin || value.protocol !== 'openai' ? 'deepseek' : 'openai',
     capabilities: readCapabilities(value.capabilities),
+    // 0.4.0 之前的存档没有提示词字段：null 表示用默认值，与「明确清空」区分开
+    systemPrompt: typeof value.systemPrompt === 'string' ? value.systemPrompt : null,
   }
 }
 
@@ -197,6 +217,7 @@ const createBuiltin = (apiKey: string): Provider => ({
   model: BUILTIN_MODEL,
   protocol: 'deepseek',
   capabilities: { ...FULL_CAPABILITIES },
+  systemPrompt: null,
 })
 
 /** 保证列表里始终有内置项，并把升级前的 API Key 迁移进去 */
@@ -248,7 +269,7 @@ const readState = (): ProvidersState => {
   } catch {
     // 存档损坏时回到只有内置提供商的初始状态
   }
-  if (schema < STORAGE_SCHEMA) {
+  if (schema < SCHEMA_OPENAI_CAPABILITIES) {
     providers = migrateOpenAiCapabilities(providers)
   }
   providers = withBuiltin(providers, legacyKey)
@@ -366,6 +387,8 @@ export const updateProvider = (id: string, patch: ProviderPatch) => {
     id === BUILTIN_PROVIDER_ID
       ? {
           ...(patch.apiKey !== undefined ? { apiKey: patch.apiKey } : {}),
+          // 系统提示词是用户自己的语气设定，内置项也允许改
+          ...(patch.systemPrompt !== undefined ? { systemPrompt: patch.systemPrompt } : {}),
           ...(patch.capabilities !== undefined ? { capabilities: patch.capabilities } : {}),
         }
       : patch
@@ -406,6 +429,7 @@ export const addProvider = (name: string): string => {
     model: BUILTIN_MODEL,
     protocol: 'deepseek',
     capabilities: { ...CUSTOM_CAPABILITIES },
+    systemPrompt: null,
   }
   commit({
     providers: sortProviders([...useProviders.getState().providers, provider]),
