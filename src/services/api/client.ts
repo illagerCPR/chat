@@ -1,5 +1,6 @@
 import { translate, type TranslationMessage } from '../../i18n/index.js'
 import {
+  chatUrl,
   getActiveProvider,
   getProviderShape,
   modelsUrl,
@@ -235,7 +236,7 @@ export async function* streamMessage(
   signal: AbortSignal
 ): AsyncGenerator<MessageStreamEvent> {
   const resolved = resolveEndpoint(baseUrl)
-  const response = await request(resolved.messages, {
+  const response = await request(chatUrl(baseUrl, 'deepseek'), {
     method: 'POST',
     headers: {
       ...anthropicHeaders(resolved.shape, apiKey, hasFile(body)),

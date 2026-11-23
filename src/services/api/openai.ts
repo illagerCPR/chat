@@ -1,4 +1,4 @@
-import { openAiBase } from '../providers.js'
+import { chatUrl } from '../providers.js'
 import { ApiError, readErrorResponse, request } from './client.js'
 import { readServerSentEvents } from './sse.js'
 import type { MessageStreamEvent, MessageUsage, StopReason } from './types.js'
@@ -115,7 +115,7 @@ export async function* streamOpenAiMessage(
   body: OpenAiChatRequest,
   signal: AbortSignal
 ): AsyncGenerator<MessageStreamEvent> {
-  const response = await request(`${openAiBase(baseUrl)}/chat/completions`, {
+  const response = await request(chatUrl(baseUrl, 'openai'), {
     method: 'POST',
     headers: {
       ...(apiKey === '' ? {} : { Authorization: `Bearer ${apiKey}` }),

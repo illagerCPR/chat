@@ -527,6 +527,15 @@ export const resolveEndpoint = (baseUrl: string): ResolvedEndpoint => {
   }
 }
 
+/** 对话请求地址：两种协议规则不同，设置页的「实际请求」预览与请求构建共用这一处 */
+export const chatUrl = (baseUrl: string, protocol: ProviderProtocol): string => {
+  if (protocol === 'openai') {
+    const base = openAiBase(baseUrl)
+    return base === '' ? '' : `${base}/chat/completions`
+  }
+  return resolveEndpoint(baseUrl).messages
+}
+
 /** 拉取模型列表、校验 Key 的地址：两种协议的版本段规则不同 */
 export const modelsUrl = (baseUrl: string, protocol: ProviderProtocol): string =>
   protocol === 'openai' ? `${openAiBase(baseUrl)}/models` : resolveEndpoint(baseUrl).models

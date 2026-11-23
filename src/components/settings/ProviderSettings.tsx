@@ -7,12 +7,12 @@ import { Select } from '../base/Select.js'
 import { listModels } from '../../services/api/models.js'
 import {
   addProvider,
+  chatUrl,
   getProviderShape,
   isCapabilitySupported,
   isValidBaseUrl,
   normalizeBaseUrl,
   removeProvider,
-  resolveEndpoint,
   setActiveProvider,
   updateProvider,
   useOfficialKeyReady,
@@ -66,7 +66,8 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
   const shape = getProviderShape(provider)
   // 订阅官方 Key：语音、余额与第三方端点上的搜索是否可选由它决定
   const officialReady = useOfficialKeyReady()
-  const endpoint = resolveEndpoint(provider.baseUrl)
+  // 预览跟随输入并按协议解析，与 streamMessage / streamOpenAiMessage 共用同一套地址规则
+  const previewUrl = isValidBaseUrl(baseUrl) ? chatUrl(baseUrl, provider.protocol) : ''
 
   const commitName = () => {
     const value = name.trim()
@@ -165,9 +166,9 @@ const ProviderEditor = ({ provider }: { provider: Provider }) => {
           onBlur={commitBaseUrl}
           onKeyDown={commitOnEnter}
         />
-        {endpoint.messages !== '' ? (
+        {previewUrl !== '' ? (
           <div className={styles.description}>
-            {t('providerEndpointPreview', { url: endpoint.messages })}
+            {t('providerEndpointPreview', { url: previewUrl })}
           </div>
         ) : null}
       </Field>
