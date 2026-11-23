@@ -115,6 +115,7 @@ export const zh = {
   storageLocationBrowser: '浏览器本地（IndexedDB），仅当前浏览器可见',
   storageLocationServer: '服务器数据卷（{path}），所有访问者共享',
   storageLocationServerFallback: '服务器数据卷，所有访问者共享',
+  storageLocationCloudflare: 'Cloudflare D1 + R2，所有访问者共享',
   historyImport: '导入历史对话',
   historyImportConfirm: '确认导入',
   historyImportConfirmTitle: '确认导入历史对话？',

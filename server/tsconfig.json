@@ -17,5 +17,5 @@
     "noImplicitReturns": true,
     "useUnknownInCatchVariables": true
   },
-  "include": ["*.ts"]
+  "include": ["**/*.ts"]
 }

@@ -1,0 +1,12 @@
+# Cloudflare Static Assets 的自定义响应头（构建时拷到 dist 根目录）。
+# 与自托管版的 server/node/static.ts 保持同一套缓存策略：
+# /static/ 下是带内容哈希的文件，可以长期缓存；入口页与图标每次校验。
+
+/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/icon.svg
+  Cache-Control: no-cache
+
+/
+  Cache-Control: no-cache

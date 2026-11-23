@@ -19,6 +19,9 @@ build
 .env.*
 tmp
 
+# Cloudflare 本地开发状态
+.wrangler
+
 # 本地运行存储服务时产生的数据，绝不进镜像
 data
 .data

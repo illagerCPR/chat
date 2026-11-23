@@ -476,9 +476,11 @@ const StorageSetting = () => {
       ? undefined
       : info.mode === 'indexeddb'
         ? t('storageLocationBrowser')
-        : info.dataDir
-          ? t('storageLocationServer', { path: info.dataDir })
-          : t('storageLocationServerFallback')
+        : info.backend === 'd1'
+          ? t('storageLocationCloudflare')
+          : info.dataDir
+            ? t('storageLocationServer', { path: info.dataDir })
+            : t('storageLocationServerFallback')
 
   return (
     <SettingCell
