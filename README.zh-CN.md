@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-基于 DeepSeek API 的聊天客户端。默认是纯静态页面：不需要应用后端，浏览器直接请求配置的 API 服务。自托管时还可以启动内置的存储服务，把对话数据保存在 Docker 数据卷里，重建容器或升级镜像都不会丢失。
+基于 DeepSeek API 的聊天客户端。默认是纯静态页面：不需要应用后端，浏览器直接请求配置的 API 服务。自托管时还可以启动内置的存储服务，把对话数据保存在 Docker 数据卷里，重建容器或升级镜像都不会丢失；也可以部署到 Cloudflare（Workers + D1 + R2），不用自己运维服务器。
 
 点击 [在线体验](https://www.illageraris.dpdns.org/chat/) 即可使用；也可以把 `pnpm build` 的产物部署到任意静态服务器，或直接打开 `dist/index.html` 在本机使用。首次使用时，请在设置中填写 API Key。
 
@@ -32,14 +32,14 @@ docker compose up -d
 mkdir -p ./data && sudo chown 1000:1000 ./data
 ```
 
-| 环境变量           | 默认值 | 说明                                       |
-| ------------------ | ------ | ------------------------------------------ |
-| `PORT`             | `3000` | 监听端口                                   |
-| `CHAT_DATA_DIR`    | `/data` | 数据库所在目录                            |
-| `CHAT_PASSWORD`    | 空     | 设置后启用访问口令（HTTP Basic Auth）      |
-| `CHAT_USERNAME`    | `chat` | 口令对应的用户名                           |
-| `CHAT_MAX_FILE_MB` | `64`   | 单个附件原件的大小上限                     |
-| `CHAT_MAX_SESSION_MB` | `32` | 单个会话 JSON 的大小上限                   |
+| 环境变量              | 默认值  | 说明                                  |
+| --------------------- | ------- | ------------------------------------- |
+| `PORT`                | `3000`  | 监听端口                              |
+| `CHAT_DATA_DIR`       | `/data` | 数据库所在目录                        |
+| `CHAT_PASSWORD`       | 空      | 设置后启用访问口令（HTTP Basic Auth） |
+| `CHAT_USERNAME`       | `chat`  | 口令对应的用户名                      |
+| `CHAT_MAX_FILE_MB`    | `64`    | 单个附件原件的大小上限                |
+| `CHAT_MAX_SESSION_MB` | `32`    | 单个会话 JSON 的大小上限              |
 
 口令只在反向代理提供 HTTPS 时才算安全，纯 HTTP 下凭据是明文传输的。
 
@@ -49,7 +49,48 @@ mkdir -p ./data && sudo chown 1000:1000 ./data
 docker run --rm -v chat-data:/data -v "$PWD":/backup alpine tar -czf /backup/chat-data.tgz -C /data .
 ```
 
-### 方式三：本地开发
+### 方式三：Cloudflare 部署（Workers + D1 + R2）
+
+想长期在线、又不想自己运维服务器时用这条线：前端产物由 Cloudflare Workers 的静态资源伺服，对话数据存进 D1（SQLite），附件原件存进 R2。代码在 [worker/index.ts](worker/index.ts)，与自托管版共用同一套存储接口。
+
+前置条件：Cloudflare 账号，并在控制台 **R2 → 开通**（需要绑定支付方式；每月 10 GB 存储与 100 万次 A 类操作都在免费额度内）。
+
+```sh
+wrangler login
+wrangler r2 bucket create aris-chat-files
+pnpm db:migrate:remote     # 建表：wrangler d1 migrations apply aris-chat --remote
+pnpm deploy:cf             # 构建并发布 Worker（含前端产物）
+```
+
+D1 数据库 `aris-chat` 已经创建，`database_id` 写在 [wrangler.jsonc](wrangler.jsonc) 里；换账号部署时先 `wrangler d1 create aris-chat`，再把新的 id 替换进去。
+
+发布后到 Workers 控制台给 Worker 绑定域名。**如果打算叠加 Cloudflare Access**，要注意 Access 只作用于自定义域名，`*.workers.dev` 那个入口会绕过它；想堵住这个口子，就同时设一个访问口令：
+
+```sh
+wrangler secret put CHAT_PASSWORD
+```
+
+口令只作用于 `/api/*`：静态资源由 CDN 直接伺服，不经过 Worker，因此不消耗 Worker 请求额度，也不受口令保护。数据本身都在 `/api` 后面。
+
+本地调试不需要真实的 Cloudflare 资源，`wrangler dev` 会用本地模拟的 D1 与 R2：
+
+```sh
+pnpm build
+pnpm db:migrate:local
+pnpm dev:cf                # 3000 端口，正好是 pnpm dev 的 /api 代理目标
+```
+
+自动部署：[.github/workflows/cloudflare.yml](.github/workflows/cloudflare.yml) 在 push 到 main 时执行「类型检查 → lint → 构建 → D1 迁移 → 发布」。在仓库 Secrets 里配置 `CLOUDFLARE_API_TOKEN`（模板选 "Edit Cloudflare Workers"，再补 R2 的 Edit 权限）与 `CLOUDFLARE_ACCOUNT_ID`；没配 Token 时部署步骤自动跳过，流水线不会变红。
+
+与自托管版的差异（都是平台限制，不是配置项）：
+
+- 单个会话正文上限 2 MB（D1 单行上限，默认限到 1.9 MB），超限时保存会明确报错；
+- 单个附件上限 25 MB（受 Worker 128 MB 内存约束）；
+- 免费额度：D1 单库 500 MB、R2 10 GB、Workers 每天 10 万次请求；单请求 CPU 超过 10 ms 时免费版会报 1102 错误。
+
+数据迁移用设置里的「导入历史对话」即可：新部署指向空库，导入一次就把旧数据搬过去。
+
+### 方式四：本地开发
 
 前端构建需要 Node.js 22.12+ 和 pnpm；运行内置存储服务需要 Node.js 24+（用到内置 SQLite 与 TypeScript 类型剥离）。
 
@@ -125,8 +166,9 @@ pnpm build
 
 - 静态部署：会话与附件原件保存在浏览器 IndexedDB，按浏览器用户配置和站点源（origin）隔离。
 - Docker 自托管：会话与附件保存在服务端的 `/data/chat.db`，由数据卷持久化；浏览器只缓存当前页面里的状态，换浏览器或换设备访问同一实例能看到同一份对话。
+- Cloudflare 部署：会话正文与附件元数据存在 D1，附件原件存在 R2；浏览器同样只缓存页面状态，所有访问者共享同一份对话。
 
-两种方式下，发送消息、上传附件和使用语音功能都会把相应内容提交给配置的 API 服务。
+三种方式下，发送消息、上传附件和使用语音功能都会把相应内容提交给配置的 API 服务。
 
 设置中的历史导入导出使用 ZIP 格式。导入会在确认并校验成功后替换全部会话和附件；导出包含会话与可用的图片原件，不包含 API Key、设置或非图片附件原件。格式与保留范围见[历史导入导出](src/services/chat/history/README.md)。
 
@@ -134,22 +176,28 @@ pnpm build
 
 ## 开发
 
-| 命令             | 用途                        |
-| ---------------- | --------------------------- |
-| `pnpm dev`       | 启动开发服务器              |
-| `pnpm dev:server`| 启动内置存储服务（开发用）  |
-| `pnpm build`     | 构建到 `dist/`              |
-| `pnpm start`     | 运行构建产物与存储服务      |
-| `pnpm type`      | TypeScript 类型检查         |
-| `pnpm lint`      | oxlint 检查                 |
-| `pnpm format`    | oxfmt 格式化                |
+| 命令                                                | 用途                                      |
+| --------------------------------------------------- | ----------------------------------------- |
+| `pnpm dev`                                          | 启动开发服务器                            |
+| `pnpm dev:server`                                   | 启动内置存储服务（开发用）                |
+| `pnpm dev:cf`                                       | 本地运行 Cloudflare 版（本地 D1/R2 模拟） |
+| `pnpm deploy:cf`                                    | 发布 Worker（含前端产物）                 |
+| `pnpm db:migrate:local`<br>`pnpm db:migrate:remote` | 应用 D1 表结构迁移（本地 / 线上）         |
+| `pnpm build`                                        | 构建到 `dist/`                            |
+| `pnpm start`                                        | 运行构建产物与存储服务                    |
+| `pnpm type`                                         | TypeScript 类型检查                       |
+| `pnpm lint`                                         | oxlint 检查                               |
+| `pnpm format`                                       | oxfmt 格式化                              |
 
 [rspack.config.ts](rspack.config.ts) 默认连接 `https://api.deepseek.com`。`createConfig({ apiOrigin, devServer })` 支持自定义 API 地址和开发服务器代理。
 
 聊天默认使用 `deepseek-flash`，通过 Anthropic 兼容的 Messages / Files API 通信；语音使用 ASR / TTS 接口。请求使用搜索、链接阅读、标题和 `latest_reminder` 等扩展，接入服务需支持相应能力。附件实际支持的格式以服务端校验为准。
 
 ```text
-server/               内置存储服务：静态资源 + 对话存储 API（实现见 server/README.md）
+server/               服务端核心：路由与校验（core/）、存储实现（store/）、自托管入口（node/）
+worker/               Cloudflare Worker 入口，复用 server/core 的路由
+migrations/           D1 表结构迁移
+cloudflare/           静态资源的缓存头规则（构建时拷到 dist）
 src/
   app/                应用布局、主题与全局样式
   components/         聊天、设置、Markdown 等界面组件
@@ -162,7 +210,7 @@ src/
   utils/              通用工具
 ```
 
-存储实现在 [src/services/chat/storage/](src/services/chat/storage/) 下：`indexeddb.ts` 是浏览器本地实现，`server.ts` 走内置存储服务，启动时探测同源是否存在 `/api/storage` 自动选择。
+存储实现在 [src/services/chat/storage/](src/services/chat/storage/) 下：`indexeddb.ts` 是浏览器本地实现，`server.ts` 走内置存储服务，启动时探测同源是否存在 `/api/storage` 自动选择。服务端细节见 [server/README.md](server/README.md)。
 
 ## 许可证
 

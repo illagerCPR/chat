@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-A chat client for the DeepSeek API. By default it is a static site with no application backend: the browser calls the configured API service directly. When self-hosting you can also run the bundled storage service, which keeps conversations in a Docker volume so they survive container rebuilds and image upgrades.
+A chat client for the DeepSeek API. By default it is a static site with no application backend: the browser calls the configured API service directly. When self-hosting you can also run the bundled storage service, which keeps conversations in a Docker volume so they survive container rebuilds and image upgrades, or deploy the same app to Cloudflare Workers with D1 and R2 and skip server maintenance entirely.
 
 [Try it online](https://www.illageraris.dpdns.org/chat/), or serve the contents of `pnpm build` from any static host, or open `dist/index.html` locally. Enter your API key in Settings before your first chat.
 
@@ -32,14 +32,14 @@ To keep the data files visible on the host instead, point `volumes` at a host di
 mkdir -p ./data && sudo chown 1000:1000 ./data
 ```
 
-| Variable              | Default | Description                                    |
-| --------------------- | ------- | ---------------------------------------------- |
-| `PORT`                | `3000`  | Listen port                                    |
-| `CHAT_DATA_DIR`       | `/data` | Directory holding the database                 |
-| `CHAT_PASSWORD`       | empty   | Enables HTTP Basic Auth when set               |
-| `CHAT_USERNAME`       | `chat`  | Username for Basic Auth                        |
-| `CHAT_MAX_FILE_MB`    | `64`    | Maximum stored attachment size                 |
-| `CHAT_MAX_SESSION_MB` | `32`    | Maximum session JSON size                      |
+| Variable              | Default | Description                      |
+| --------------------- | ------- | -------------------------------- |
+| `PORT`                | `3000`  | Listen port                      |
+| `CHAT_DATA_DIR`       | `/data` | Directory holding the database   |
+| `CHAT_PASSWORD`       | empty   | Enables HTTP Basic Auth when set |
+| `CHAT_USERNAME`       | `chat`  | Username for Basic Auth          |
+| `CHAT_MAX_FILE_MB`    | `64`    | Maximum stored attachment size   |
+| `CHAT_MAX_SESSION_MB` | `32`    | Maximum session JSON size        |
 
 Basic Auth is only safe behind an HTTPS reverse proxy; over plain HTTP the credentials travel in clear text.
 
@@ -49,7 +49,48 @@ Backups: Settings can always export every conversation as a ZIP that any deploym
 docker run --rm -v chat-data:/data -v "$PWD":/backup alpine tar -czf /backup/chat-data.tgz -C /data .
 ```
 
-### Option 3: local development
+### Option 3: Cloudflare (Workers + D1 + R2)
+
+For an always-online instance without running a server yourself: static assets are served by Cloudflare Workers Assets, conversations live in D1 (SQLite), and original attachments live in R2. The code is in [worker/index.ts](worker/index.ts) and reuses the same storage interface as the self-hosted build.
+
+Prerequisites: a Cloudflare account, and **R2 enabled** in the dashboard (it asks for a payment method; 10 GB of storage and 1 million Class A operations per month are free).
+
+```sh
+wrangler login
+wrangler r2 bucket create aris-chat-files
+pnpm db:migrate:remote     # create tables: wrangler d1 migrations apply aris-chat --remote
+pnpm deploy:cf             # build and publish the Worker (assets included)
+```
+
+The D1 database `aris-chat` already exists and its `database_id` is committed in [wrangler.jsonc](wrangler.jsonc). Deploying to another account starts with `wrangler d1 create aris-chat` and swapping that id.
+
+After deploying, attach a custom domain to the Worker. **If you plan to put Cloudflare Access in front of it**, note that Access only covers custom domains: the `*.workers.dev` hostname bypasses it. Close that hole with a password too:
+
+```sh
+wrangler secret put CHAT_PASSWORD
+```
+
+The password only guards `/api/*`: static assets are served straight from the CDN, so they neither reach the Worker nor count against its request quota, and they are not protected. All conversation data sits behind `/api`.
+
+Local development needs no real Cloudflare resources — `wrangler dev` runs a local D1 and R2:
+
+```sh
+pnpm build
+pnpm db:migrate:local
+pnpm dev:cf                # port 3000, which is where pnpm dev proxies /api
+```
+
+Continuous deployment: [.github/workflows/cloudflare.yml](.github/workflows/cloudflare.yml) runs type check → lint → build → D1 migrations → deploy on every push to `main`. Set `CLOUDFLARE_API_TOKEN` (use the "Edit Cloudflare Workers" template, then add R2 Edit) and `CLOUDFLARE_ACCOUNT_ID` in the repository secrets; without a token the deploy steps are skipped instead of failing.
+
+Differences from the self-hosted build (platform limits, not settings):
+
+- A single session body is capped at 2 MB (the D1 row limit; the app caps it at 1.9 MB) and saving past it returns an explicit error;
+- A single attachment is capped at 25 MB (Workers have 128 MB of memory per isolate);
+- Free plan limits: 500 MB per D1 database, 10 GB of R2 storage, and 100,000 Worker requests per day; a request that exceeds 10 ms of CPU fails with error 1102 on the free plan.
+
+To move existing conversations, use Settings → Import: a fresh deployment starts with an empty database.
+
+### Option 4: local development
 
 Building the frontend needs Node.js 22.12+ and pnpm; running the bundled storage service needs Node.js 24+ (it uses the built-in SQLite module and runs TypeScript directly).
 
@@ -125,8 +166,9 @@ Your provider settings and interface settings are always stored in the browser's
 
 - Static site: conversations and original attachments are stored in the browser's IndexedDB, isolated by browser profile and site origin.
 - Self-hosted Docker: conversations and attachments are stored in `/data/chat.db` on the server and persisted by the data volume; the browser only keeps page state, so any browser or device that reaches the instance sees the same conversations.
+- Cloudflare: conversation bodies and attachment metadata live in D1 while original attachments live in R2; the browser again keeps only page state, so every visitor shares the same conversations.
 
-In both cases, sending messages, uploading attachments, and using speech features send the relevant content to the configured API service.
+In all three cases, sending messages, uploading attachments, and using speech features send the relevant content to the configured API service.
 
 History import and export in Settings use ZIP archives. After confirmation and successful validation, importing replaces all conversations and attachments. Exports include conversations and locally available original images, but exclude API keys, settings, and original non-image attachments. See the [history import/export documentation (Chinese)](src/services/chat/history/README.md) for the archive format and preservation details.
 
@@ -134,22 +176,28 @@ Settings → Data → Delete all chats clears all conversations, original attach
 
 ## Development
 
-| Command          | Description                          |
-| ---------------- | ------------------------------------ |
-| `pnpm dev`       | Start the development server         |
-| `pnpm dev:server`| Start the storage service (dev)      |
-| `pnpm build`     | Build into `dist/`                   |
-| `pnpm start`     | Run the build with the storage service |
-| `pnpm type`      | Run TypeScript type checks           |
-| `pnpm lint`      | Lint with oxlint                     |
-| `pnpm format`    | Format with oxfmt                    |
+| Command                                             | Description                                    |
+| --------------------------------------------------- | ---------------------------------------------- |
+| `pnpm dev`                                          | Start the development server                   |
+| `pnpm dev:server`                                   | Start the storage service (dev)                |
+| `pnpm dev:cf`                                       | Run the Cloudflare build locally (local D1/R2) |
+| `pnpm deploy:cf`                                    | Deploy the Worker with the site                |
+| `pnpm db:migrate:local`<br>`pnpm db:migrate:remote` | Apply D1 migrations (local / remote)           |
+| `pnpm build`                                        | Build into `dist/`                             |
+| `pnpm start`                                        | Run the build with the storage service         |
+| `pnpm type`                                         | Run TypeScript type checks                     |
+| `pnpm lint`                                         | Lint with oxlint                               |
+| `pnpm format`                                       | Format with oxfmt                              |
 
 [rspack.config.ts](rspack.config.ts) uses `https://api.deepseek.com` by default. Use `createConfig({ apiOrigin, devServer })` to customize the API origin and development server proxy.
 
 Chat uses `deepseek-flash` by default through Anthropic-compatible Messages / Files APIs. Speech features use ASR / TTS endpoints. Requests include extensions for search, link reading, titles, and `latest_reminder`, so the configured service must support the corresponding capabilities. Supported attachment formats are determined by server-side validation.
 
 ```text
-server/               Bundled storage service: static assets + conversation storage API
+server/               Server core: routing and validation (core/), storage (store/), self-hosted entry (node/)
+worker/               Cloudflare Worker entry, reuses the server/core routes
+migrations/           D1 schema migrations
+cloudflare/           Cache-control rules for static assets (copied into dist)
 src/
   app/                Application layout, themes, and global styles
   components/         Chat, settings, Markdown, and other UI components
@@ -162,7 +210,7 @@ src/
   utils/              Shared utilities
 ```
 
-Storage backends live in [src/services/chat/storage/](src/services/chat/storage/): `indexeddb.ts` is the browser implementation and `server.ts` talks to the bundled service. On startup the app probes `/api/storage` on the same origin and picks one automatically.
+Storage backends live in [src/services/chat/storage/](src/services/chat/storage/): `indexeddb.ts` is the browser implementation and `server.ts` talks to the bundled service. On startup the app probes `/api/storage` on the same origin and picks one automatically. Server-side details are in [server/README.md](server/README.md).
 
 ## License
 
