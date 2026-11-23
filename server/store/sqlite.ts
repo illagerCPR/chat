@@ -1,122 +1,104 @@
-import type { DatabaseSync, StatementSync } from 'node:sqlite'
-import { HttpError } from './http.ts'
+import { mkdirSync } from 'node:fs'
+import path from 'node:path'
+import { DatabaseSync, type StatementSync } from 'node:sqlite'
+import { bytesToStream } from '../core/http.ts'
+import { retypeSessionJson } from '../core/validate.ts'
+import type { ChatStore, FileInput, SessionInput, SessionSummary, StoredFileBody } from './types.ts'
 
-/** 与前端 SessionSummary 同构；服务端只回传列表需要的元信息。 */
-export type SessionSummary = {
-  id: string
-  title: string
-  createdAt: number
-  updatedAt: number
-}
-
-/** 一次会话写入需要的列，JSON 原样保存，附件引用单独建边。 */
-export type SessionInput = {
-  id: string
-  title: string
-  createdAt: number
-  updatedAt: number
-  json: string
-  fileIds: string[]
-}
-
-export type FileInput = {
-  id: string
-  mimeType: string
-  data: Uint8Array
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const isTimestamp = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isFinite(value)
+/** 当前表结构版本；改动 schema 时递增并补迁移步骤。 */
+const SCHEMA_VERSION = 1
 
 /**
- * 校验会话 JSON 的骨架：正文由前端与历史导入共同保证，
- * 这里只挡住会让数据库列或列表出现废数据的情况。
+ * 会话正文按整份 JSON 保存：前端一次读写整个会话（含消息树），
+ * 拆字段只会让写入和分支关系更难维护。列表需要的元信息单独成列。
+ *
+ * 与 migrations/0001_init.sql 必须保持一致：那份给 Cloudflare D1 用，
+ * 这份给自托管的 node:sqlite 用，两边只有 PRAGMA 与版本表不同。
  */
-export const parseSessionInput = (value: unknown): SessionInput => {
-  if (!isRecord(value)) {
-    throw new HttpError(400, 'Session must be a JSON object')
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  data TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS files (
+  id TEXT PRIMARY KEY,
+  mime_type TEXT NOT NULL DEFAULT '',
+  size INTEGER NOT NULL,
+  data BLOB NOT NULL
+);
+
+-- 会话与附件的引用关系：删除会话时级联清理，附件只有在无人引用时才回收
+CREATE TABLE IF NOT EXISTS session_files (
+  session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+  file_id TEXT NOT NULL,
+  PRIMARY KEY (session_id, file_id)
+);
+
+CREATE INDEX IF NOT EXISTS session_files_file ON session_files (file_id);
+CREATE INDEX IF NOT EXISTS sessions_updated ON sessions (updated_at DESC);
+
+-- 历史导入的暂存区，结构与正式表一致；提交时在一个事务里整体替换
+CREATE TABLE IF NOT EXISTS staging_sessions (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  data TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS staging_files (
+  id TEXT PRIMARY KEY,
+  mime_type TEXT NOT NULL DEFAULT '',
+  size INTEGER NOT NULL,
+  data BLOB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS staging_session_files (
+  session_id TEXT NOT NULL,
+  file_id TEXT NOT NULL,
+  PRIMARY KEY (session_id, file_id)
+);
+`
+
+const migrate = (db: DatabaseSync): void => {
+  const row = db.prepare('PRAGMA user_version').get() as { user_version?: number } | undefined
+  const current = row?.user_version ?? 0
+  if (current > SCHEMA_VERSION) {
+    throw new Error(
+      `Database schema version ${current} is newer than this build supports (${SCHEMA_VERSION}); use a newer image`
+    )
   }
-  const { id, title, createdAt, updatedAt, messages } = value
-  if (typeof id !== 'string' || id === '') {
-    throw new HttpError(400, 'Session id is missing')
+  if (current === SCHEMA_VERSION) {
+    return
   }
-  if (typeof title !== 'string') {
-    throw new HttpError(400, 'Session title must be a string')
-  }
-  if (!isTimestamp(createdAt) || !isTimestamp(updatedAt)) {
-    throw new HttpError(400, 'Session timestamps must be finite numbers')
-  }
-  if (!Array.isArray(messages)) {
-    throw new HttpError(400, 'Session messages must be an array')
-  }
-  const fileIds = new Set<string>()
-  for (const message of messages) {
-    if (!isRecord(message) || message.role !== 'user' || !Array.isArray(message.files)) {
-      continue
-    }
-    for (const file of message.files) {
-      if (isRecord(file) && typeof file.id === 'string' && file.id !== '') {
-        fileIds.add(file.id)
-      }
-    }
-  }
-  return { id, title, createdAt, updatedAt, json: JSON.stringify(value), fileIds: [...fileIds] }
+  // 建表语句全部带 IF NOT EXISTS，从 0 升到 1 与重复执行都安全。
+  db.exec(SCHEMA)
+  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
 }
 
-export const parseTitleUpdate = (value: unknown): string => {
-  if (!isRecord(value) || typeof value.title !== 'string') {
-    throw new HttpError(400, 'Rename request must contain a title string')
-  }
-  return value.title
-}
-
-export const parseFileTypesUpdate = (value: unknown): Map<string, string> => {
-  if (!isRecord(value) || !isRecord(value.types)) {
-    throw new HttpError(400, 'File type update must contain a types object')
-  }
-  const types = new Map<string, string>()
-  for (const [id, type] of Object.entries(value.types)) {
-    if (typeof type !== 'string') {
-      throw new HttpError(400, `File type for ${id} must be a string`)
-    }
-    types.set(id, type)
-  }
-  return types
-}
-
-/** 会话正文里每处附件引用都换成本次识别出的 MIME；导入时补全图片类型用。 */
-const retypeStagingSession = (json: string, types: Map<string, string>): string | null => {
-  const session = JSON.parse(json) as unknown
-  if (!isRecord(session) || !Array.isArray(session.messages)) {
-    return null
-  }
-  let changed = false
-  for (const message of session.messages) {
-    if (!isRecord(message) || message.role !== 'user' || !Array.isArray(message.files)) {
-      continue
-    }
-    for (const file of message.files) {
-      if (!isRecord(file) || typeof file.id !== 'string') {
-        continue
-      }
-      const type = types.get(file.id) ?? ''
-      if (file.mimeType !== type) {
-        file.mimeType = type
-        changed = true
-      }
-    }
-  }
-  return changed ? JSON.stringify(session) : null
+/** 打开（必要时创建）数据目录下的数据库，并按需建表。 */
+export const openDatabase = (dataDir: string): DatabaseSync => {
+  mkdirSync(dataDir, { recursive: true })
+  const db = new DatabaseSync(path.join(dataDir, 'chat.db'))
+  // auto_vacuum 必须在新库建表前设置；删除会话后附件占用的页才会被回收
+  db.exec('PRAGMA auto_vacuum = INCREMENTAL')
+  db.exec('PRAGMA journal_mode = WAL')
+  db.exec('PRAGMA synchronous = NORMAL')
+  db.exec('PRAGMA foreign_keys = ON')
+  db.exec('PRAGMA busy_timeout = 5000')
+  migrate(db)
+  return db
 }
 
 type Statements = {
   listSummaries: StatementSync
   readSession: StatementSync
   upsertSession: StatementSync
-  updateTitle: StatementSync
+  renameSession: StatementSync
   deleteSession: StatementSync
   deleteSessionFiles: StatementSync
   insertSessionFile: StatementSync
@@ -136,10 +118,10 @@ type Statements = {
 }
 
 /**
- * 会话与附件的读写。所有写操作走同步 API，Node 单线程下天然串行；
- * 需要「要么全成要么全不成」的路径包在事务里。
+ * 自托管容器里的实现：node:sqlite 同步 API，Node 单线程下天然串行。
+ * 对外暴露的接口是异步的，与 D1 实现同形。
  */
-export class ChatStore {
+export class SqliteChatStore implements ChatStore {
   private readonly db: DatabaseSync
   private readonly stmts: Statements
 
@@ -159,7 +141,10 @@ export class ChatStore {
            updated_at = excluded.updated_at,
            data = excluded.data`
       ),
-      updateTitle: prepare('UPDATE sessions SET title = ?, data = ? WHERE id = ?'),
+      // 列表列与正文 JSON 里的标题一起改，一条语句内原子完成，不需要读改写
+      renameSession: prepare(
+        "UPDATE sessions SET title = ?1, data = json_set(data, '$.title', ?1) WHERE id = ?2"
+      ),
       deleteSession: prepare('DELETE FROM sessions WHERE id = ?'),
       deleteSessionFiles: prepare('DELETE FROM session_files WHERE session_id = ?'),
       insertSessionFile: prepare(
@@ -173,7 +158,7 @@ export class ChatStore {
            size = excluded.size,
            data = excluded.data`
       ),
-      readFile: prepare('SELECT mime_type AS mimeType, data FROM files WHERE id = ?'),
+      readFile: prepare('SELECT mime_type AS mimeType, size, data FROM files WHERE id = ?'),
       listStagingSummaries: prepare(
         'SELECT id, title, created_at AS createdAt, updated_at AS updatedAt FROM staging_sessions ORDER BY updated_at DESC'
       ),
@@ -229,16 +214,16 @@ export class ChatStore {
     }
   }
 
-  listSummaries(): SessionSummary[] {
+  async listSummaries(): Promise<SessionSummary[]> {
     return this.stmts.listSummaries.all() as SessionSummary[]
   }
 
-  readSession(id: string): string | null {
+  async readSession(id: string): Promise<string | null> {
     const row = this.stmts.readSession.get(id) as { data?: string } | undefined
     return row?.data ?? null
   }
 
-  writeSession(session: SessionInput): void {
+  async writeSession(session: SessionInput): Promise<void> {
     this.transaction(() => {
       this.stmts.upsertSession.run(
         session.id,
@@ -254,21 +239,12 @@ export class ChatStore {
     })
   }
 
-  /** 只改标题：列表里的标题与正文 JSON 保持同步，updatedAt 不变。 */
-  renameSession(id: string, title: string): boolean {
-    return this.transaction(() => {
-      const row = this.stmts.readSession.get(id) as { data?: string } | undefined
-      if (row?.data === undefined) {
-        return false
-      }
-      const session = JSON.parse(row.data) as Record<string, unknown>
-      session.title = title
-      this.stmts.updateTitle.run(title, JSON.stringify(session), id)
-      return true
-    })
+  async renameSession(id: string, title: string): Promise<boolean> {
+    const result = this.stmts.renameSession.run(title, id)
+    return Number(result.changes) > 0
   }
 
-  deleteSession(id: string): void {
+  async deleteSession(id: string): Promise<void> {
     this.transaction(() => {
       this.stmts.deleteSession.run(id)
       this.stmts.gcFiles.run()
@@ -276,19 +252,25 @@ export class ChatStore {
     this.reclaim()
   }
 
-  writeFile(file: FileInput): void {
+  async writeFile(file: FileInput): Promise<void> {
     this.stmts.writeFile.run(file.id, file.mimeType, file.data.byteLength, file.data)
   }
 
-  readFile(id: string): { mimeType: string; data: Uint8Array } | null {
-    const row = this.stmts.readFile.get(id) as { mimeType?: string; data?: Uint8Array } | undefined
+  async readFile(id: string): Promise<StoredFileBody | null> {
+    const row = this.stmts.readFile.get(id) as
+      | { mimeType?: string; size?: number; data?: Uint8Array }
+      | undefined
     if (row?.data === undefined) {
       return null
     }
-    return { mimeType: row.mimeType ?? '', data: row.data }
+    return {
+      mimeType: row.mimeType ?? '',
+      size: row.size ?? row.data.byteLength,
+      body: bytesToStream(row.data),
+    }
   }
 
-  writeStagingSession(session: SessionInput): void {
+  async writeStagingSession(session: SessionInput): Promise<void> {
     this.transaction(() => {
       this.stmts.upsertStagingSession.run(
         session.id,
@@ -304,18 +286,18 @@ export class ChatStore {
     })
   }
 
-  writeStagingFile(file: FileInput): void {
+  async writeStagingFile(file: FileInput): Promise<void> {
     this.stmts.writeStagingFile.run(file.id, file.mimeType, file.data.byteLength, file.data)
   }
 
-  updateStagingFileTypes(types: Map<string, string>): void {
+  async updateStagingFileTypes(types: ReadonlyMap<string, string>): Promise<void> {
     if (types.size === 0) {
       return
     }
     this.transaction(() => {
       const rows = this.stmts.listStagingSessions.all() as { id: string; data: string }[]
       for (const row of rows) {
-        const updated = retypeStagingSession(row.data, types)
+        const updated = retypeSessionJson(row.data, types)
         if (updated !== null) {
           this.stmts.updateStagingSession.run(updated, row.id)
         }
@@ -323,7 +305,7 @@ export class ChatStore {
     })
   }
 
-  clearStaging(): void {
+  async clearStaging(): Promise<void> {
     this.transaction(() => {
       this.stmts.clearStagingSessions.run()
       this.stmts.clearStagingFiles.run()
@@ -336,7 +318,7 @@ export class ChatStore {
    * 用暂存内容整体替换正式数据：删、搬、清暂存在同一个事务里，
    * 任何一步失败都回滚，原有会话保持可用。
    */
-  commitStaging(): SessionSummary[] {
+  async commitStaging(): Promise<SessionSummary[]> {
     const summaries = this.stmts.listStagingSummaries.all() as SessionSummary[]
     this.transaction(() => {
       this.db.exec('DELETE FROM session_files')
@@ -359,7 +341,7 @@ export class ChatStore {
     return summaries
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.db.close()
   }
 }

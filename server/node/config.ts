@@ -1,5 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { AuthConfig } from '../core/auth.ts'
+import type { RouterLimits } from '../core/router.ts'
 
 /** 运行时配置；全部来自环境变量，未设置时用容器内的默认值。 */
 export type ServerConfig = {
@@ -9,12 +11,9 @@ export type ServerConfig = {
   dataDir: string
   /** 前端构建产物目录 */
   distDir: string
-  /** Basic Auth 用户名，仅在设置了密码时生效 */
-  username: string
   /** null 表示不做访问控制 */
-  password: string | null
-  maxSessionBytes: number
-  maxFileBytes: number
+  auth: AuthConfig | null
+  limits: RouterLimits
 }
 
 const MB = 1024 * 1024
@@ -40,8 +39,8 @@ const stringFromEnv = (name: string, fallback: string): string => {
   return raw === undefined || raw.trim() === '' ? fallback : raw.trim()
 }
 
-/** 默认产物目录按本文件位置推导：源码在 server/，产物在旁支的 dist/。 */
-const defaultDistDir = () => fileURLToPath(new URL('../dist', import.meta.url))
+/** 默认产物目录按本文件位置推导：源码在 server/node/，产物在仓库根的 dist/。 */
+const defaultDistDir = () => fileURLToPath(new URL('../../dist', import.meta.url))
 
 export const loadConfig = (): ServerConfig => {
   const password = process.env.CHAT_PASSWORD?.trim() ?? ''
@@ -50,9 +49,13 @@ export const loadConfig = (): ServerConfig => {
     port: intFromEnv('PORT', DEFAULT_PORT),
     dataDir: path.resolve(stringFromEnv('CHAT_DATA_DIR', '/data')),
     distDir: path.resolve(stringFromEnv('CHAT_DIST_DIR', defaultDistDir())),
-    username: stringFromEnv('CHAT_USERNAME', 'chat'),
-    password: password === '' ? null : password,
-    maxSessionBytes: intFromEnv('CHAT_MAX_SESSION_MB', DEFAULT_MAX_SESSION_MB) * MB,
-    maxFileBytes: intFromEnv('CHAT_MAX_FILE_MB', DEFAULT_MAX_FILE_MB) * MB,
+    auth:
+      password === ''
+        ? null
+        : { username: stringFromEnv('CHAT_USERNAME', 'chat'), password },
+    limits: {
+      maxSessionBytes: intFromEnv('CHAT_MAX_SESSION_MB', DEFAULT_MAX_SESSION_MB) * MB,
+      maxFileBytes: intFromEnv('CHAT_MAX_FILE_MB', DEFAULT_MAX_FILE_MB) * MB,
+    },
   }
 }
