@@ -8,9 +8,14 @@ WORKDIR /app
 # 与 .github/workflows/pages.yml 保持同一 pnpm 版本，锁文件才能冻结安装
 RUN npm install -g pnpm@12.6.0
 
-# 先只拷清单，依赖层可复用缓存
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+# 先只拷清单，依赖层可复用缓存。
+#
+# --ignore-scripts：镜像里只跑 pnpm build（rspack），用不到 esbuild 与 workerd
+# 的二进制。而 workerd 的安装脚本会执行 `workerd --version` 做校验，它只有
+# glibc 版本，在 alpine 上必然失败；跳过脚本不影响 rspack 构建（平台二进制由
+# pnpm 的可选依赖提供，本地已用同样方式验证构建通过）。
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 COPY . .
 
