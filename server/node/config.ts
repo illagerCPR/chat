@@ -49,10 +49,7 @@ export const loadConfig = (): ServerConfig => {
     port: intFromEnv('PORT', DEFAULT_PORT),
     dataDir: path.resolve(stringFromEnv('CHAT_DATA_DIR', '/data')),
     distDir: path.resolve(stringFromEnv('CHAT_DIST_DIR', defaultDistDir())),
-    auth:
-      password === ''
-        ? null
-        : { username: stringFromEnv('CHAT_USERNAME', 'chat'), password },
+    auth: password === '' ? null : { username: stringFromEnv('CHAT_USERNAME', 'chat'), password },
     limits: {
       maxSessionBytes: intFromEnv('CHAT_MAX_SESSION_MB', DEFAULT_MAX_SESSION_MB) * MB,
       maxFileBytes: intFromEnv('CHAT_MAX_FILE_MB', DEFAULT_MAX_FILE_MB) * MB,

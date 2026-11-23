@@ -143,7 +143,7 @@ export class SqliteChatStore implements ChatStore {
       ),
       // 列表列与正文 JSON 里的标题一起改，一条语句内原子完成，不需要读改写
       renameSession: prepare(
-        "UPDATE sessions SET title = ?1, data = json_set(data, '$.title', ?1) WHERE id = ?2"
+        "UPDATE sessions SET title = ?, data = json_set(data, '$.title', ?) WHERE id = ?"
       ),
       deleteSession: prepare('DELETE FROM sessions WHERE id = ?'),
       deleteSessionFiles: prepare('DELETE FROM session_files WHERE session_id = ?'),
@@ -240,7 +240,7 @@ export class SqliteChatStore implements ChatStore {
   }
 
   async renameSession(id: string, title: string): Promise<boolean> {
-    const result = this.stmts.renameSession.run(title, id)
+    const result = this.stmts.renameSession.run(title, title, id)
     return Number(result.changes) > 0
   }
 

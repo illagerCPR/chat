@@ -2,6 +2,8 @@ import type { Session, SessionSummary } from '../types.js'
 import type { Storage, StoredFile } from './types.js'
 
 export type ServerProbe = {
+  /** 数据落在哪种后端：自托管容器是 sqlite，Cloudflare 部署是 d1 */
+  backend: 'sqlite' | 'd1'
   /** 服务端数据库所在目录，用于在设置里提示备份位置；旧版本服务端可能不给。 */
   dataDir: string
 }
@@ -37,17 +39,25 @@ const probeAt = async (base: URL): Promise<ServerProbe | null> => {
     })
     // 401 说明服务在、只是需要登录：浏览器已弹出登录框，后续请求会自动带上凭据
     if (response.status === 401) {
-      return { dataDir: '' }
+      return { backend: 'sqlite', dataDir: '' }
     }
     // 静态托管会把未知路径回落到入口页（200 HTML），所以必须校验响应体标识
     if (!response.ok) {
       return null
     }
-    const payload = (await response.json()) as { mode?: unknown; dataDir?: unknown }
+    const payload = (await response.json()) as {
+      mode?: unknown
+      backend?: unknown
+      dataDir?: unknown
+    }
     if (payload.mode !== 'server') {
       return null
     }
-    return { dataDir: typeof payload.dataDir === 'string' ? payload.dataDir : '' }
+    return {
+      // 旧版本服务端没有这个字段，按自托管的 sqlite 处理
+      backend: payload.backend === 'd1' ? 'd1' : 'sqlite',
+      dataDir: typeof payload.dataDir === 'string' ? payload.dataDir : '',
+    }
   } catch {
     return null
   }

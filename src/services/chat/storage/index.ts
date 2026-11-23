@@ -7,6 +7,8 @@ export type StorageMode = 'server' | 'indexeddb'
 
 export type StorageInfo = {
   mode: StorageMode
+  /** 仅 server 模式：数据落在哪种后端；旧版本服务端不返回，按 sqlite 处理 */
+  backend?: 'sqlite' | 'd1'
   /** 仅 server 模式：服务端数据库所在目录，可能为空字符串 */
   dataDir?: string
 }
@@ -24,7 +26,10 @@ const resolve = async (): Promise<Resolved> => {
   if (server === null) {
     return { info: { mode: 'indexeddb' }, storage: indexedDbStorage }
   }
-  return { info: { mode: 'server', dataDir: server.dataDir }, storage: serverStorage }
+  return {
+    info: { mode: 'server', backend: server.backend, dataDir: server.dataDir },
+    storage: serverStorage,
+  }
 }
 
 const getResolved = () => (resolved ??= resolve())

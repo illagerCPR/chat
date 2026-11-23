@@ -7,12 +7,7 @@ import {
   readJsonBody,
   readMimeType,
 } from './http.ts'
-import {
-  parseFileTypesUpdate,
-  parseId,
-  parseSessionInput,
-  parseTitleUpdate,
-} from './validate.ts'
+import { parseFileTypesUpdate, parseId, parseSessionInput, parseTitleUpdate } from './validate.ts'
 import type { ChatStore, StorageDescriptor } from '../store/types.ts'
 
 export type RouterLimits = {

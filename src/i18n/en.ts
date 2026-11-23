@@ -120,6 +120,7 @@ export const en = {
   storageLocationBrowser: 'This browser (IndexedDB), visible only in this browser',
   storageLocationServer: 'Server data volume ({path}), shared by all visitors',
   storageLocationServerFallback: 'Server data volume, shared by all visitors',
+  storageLocationCloudflare: 'Cloudflare D1 + R2, shared by all visitors',
   historyImport: 'Import chat history',
   historyImportConfirm: 'Import',
   historyImportConfirmTitle: 'Import chat history?',

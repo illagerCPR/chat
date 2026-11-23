@@ -8,11 +8,15 @@
   "scripts": {
     "dev": "rspack serve -c rspack.config.ts",
     "build": "rm -rf dist && NODE_ENV=production rspack build -c rspack.config.ts",
-    "type": "tsc -p tsconfig.json && tsc -p server/tsconfig.json",
-    "lint": "oxlint src server rspack.config.ts",
+    "type": "tsc -p tsconfig.json && tsc -p server/tsconfig.json && tsc -p worker/tsconfig.json",
+    "lint": "oxlint src server worker rspack.config.ts",
     "format": "oxfmt --write .",
     "dev:server": "CHAT_DATA_DIR=.data node server/index.ts",
-    "start": "node server/index.ts"
+    "start": "node server/index.ts",
+    "dev:cf": "wrangler dev --port 3000",
+    "deploy:cf": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply aris-chat --local",
+    "db:migrate:remote": "wrangler d1 migrations apply aris-chat --remote"
   },
   "dependencies": {
     "@types/katex": "^0.16.5",
@@ -37,6 +41,7 @@
     "zustand": "4.4.7"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20261121.1",
     "@rspack/cli": "2.0.2",
     "@rspack/core": "2.0.2",
     "@rspack/dev-server": "2.0.1",
@@ -44,6 +49,7 @@
     "@types/node": "^24.0.0",
     "oxfmt": "0.48.0",
     "oxlint": "1.63.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "wrangler": "4.163.0"
   }
 }

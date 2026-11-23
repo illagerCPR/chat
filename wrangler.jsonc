@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "aris-chat",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-01",
+
+  // 前端产物由 Workers 的静态资源直接伺服；只有 /api/* 进 Worker，
+  // 静态文件因此不计 Worker 请求、也不经过 Basic Auth（数据都在 API 后面）。
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api", "/api/*"],
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "aris-chat",
+      "database_id": "51f5c841-bd0e-4b63-bc71-0833231bccb3",
+      "migrations_dir": "migrations",
+    },
+  ],
+
+  // 附件原件放这里（key = files/<id>）；bucket 需先 `wrangler r2 bucket create aris-chat-files`
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "aris-chat-files" }],
+
+  "vars": {
+    // 设置 CHAT_PASSWORD（wrangler secret put）后对 /api/* 启用 Basic Auth
+    "CHAT_USERNAME": "chat",
+    "CHAT_MAX_FILE_MB": "25",
+    "CHAT_MAX_SESSION_MB": "1.9",
+  },
+
+  "observability": { "enabled": true },
+}

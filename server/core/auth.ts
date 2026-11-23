@@ -40,10 +40,7 @@ const decodeBase64 = (value: string): string | null => {
  * 这里只做凭据校验，放不放行由调用方决定：Cloudflare Access 之类的
  * 上游网关会在 Worker 之前先行拦截，两者叠加时这里仍是最后一道兜底。
  */
-export const isAuthorized = async (
-  request: Request,
-  auth: AuthConfig | null
-): Promise<boolean> => {
+export const isAuthorized = async (request: Request, auth: AuthConfig | null): Promise<boolean> => {
   if (auth === null) {
     return true
   }

@@ -87,6 +87,8 @@ export const createConfig = ({
         { from: path.resolve(root, 'LICENSE'), to: 'LICENSE', toType: 'file' },
         // 站点图标随 index.html 以相对路径引用，file:// 与子路径部署都能取到
         { from: path.resolve(root, 'src/assets/icon.svg'), to: 'icon.svg', toType: 'file' },
+        // Cloudflare Static Assets 的响应头规则；自托管版忽略这个文件
+        { from: path.resolve(root, 'cloudflare/_headers'), to: '_headers', toType: 'file' },
       ],
     }),
   ],
