@@ -177,8 +177,10 @@ export const serverStorage: Storage = {
     await send('staging', { method: 'DELETE' })
   },
 
-  addStagingSession: async (session) => {
-    await putJson(`staging/${sessionPath(session.id)}`, JSON.stringify(session))
+  addStagingSessions: async (sessions) => {
+    for (const session of sessions) {
+      await putJson(`staging/${sessionPath(session.id)}`, JSON.stringify(session))
+    }
   },
 
   saveStagingFiles: async (files: StoredFile[]) => {
@@ -187,6 +189,7 @@ export const serverStorage: Storage = {
     }
   },
 
+  /** 服务端只看暂存表，本身就只在本次导入的会话里回填 MIME，不需要额外的会话范围。 */
   updateStagingFileTypes: async (types) => {
     if (types.size === 0) {
       return
