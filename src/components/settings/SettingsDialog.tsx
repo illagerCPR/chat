@@ -137,6 +137,7 @@ const SettingsContent = ({
               />
             </>
           )}
+          <div className={styles.version}>Aris Chat v{__APP_VERSION__}</div>
         </div>
       </Modal>
       {historyImport.file ? <ImportConfirm historyImport={historyImport} /> : null}

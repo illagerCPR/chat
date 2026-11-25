@@ -168,6 +168,16 @@
   }
 }
 
+.version {
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+  text-align: right;
+}
+
 .locationCell {
   flex-wrap: wrap;
 }

@@ -13,6 +13,7 @@ declare const styles: {
   readonly "importing": string;
   readonly "importProgress": string;
   readonly "importTrack": string;
+  readonly "version": string;
   readonly "locationCell": string;
   readonly "locationSelectors": string;
   readonly "provinceSelect": string;
