@@ -62,14 +62,16 @@ export const loadFile = async (id: string): Promise<Blob | undefined> =>
 
 export const clearStaging = async (): Promise<void> => (await getStorage()).clearStaging()
 
-export const addStagingSession = async (session: Session): Promise<void> =>
-  (await getStorage()).addStagingSession(session)
+export const addStagingSessions = async (sessions: Session[]): Promise<void> =>
+  (await getStorage()).addStagingSessions(sessions)
 
 export const saveStagingFiles = async (files: StoredFile[]): Promise<void> =>
   (await getStorage()).saveStagingFiles(files)
 
-export const updateStagingFileTypes = async (types: ReadonlyMap<string, string>): Promise<void> =>
-  (await getStorage()).updateStagingFileTypes(types)
+export const updateStagingFileTypes = async (
+  types: ReadonlyMap<string, string>,
+  sessionIds: ReadonlySet<string>
+): Promise<void> => (await getStorage()).updateStagingFileTypes(types, sessionIds)
 
 export const commitStaging = async (): Promise<SessionSummary[]> =>
   (await getStorage()).commitStaging()

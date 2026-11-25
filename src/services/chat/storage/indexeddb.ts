@@ -71,6 +71,9 @@ const getDB = () =>
   }))
 
 const putFiles = async (store: 'files' | 'filesStaging', files: StoredFile[]) => {
+  if (!files.length) {
+    return
+  }
   const tx = (await getDB()).transaction(store, 'readwrite')
   await Promise.all([...files.map((file) => tx.store.put(file)), tx.done])
 }
@@ -161,35 +164,50 @@ export const indexedDbStorage: Storage = {
     ])
   },
 
-  addStagingSession: async (session) => {
-    await (await getDB()).add('sessionsStaging', session)
+  addStagingSessions: async (sessions) => {
+    if (!sessions.length) {
+      return
+    }
+    const tx = (await getDB()).transaction('sessionsStaging', 'readwrite')
+    await Promise.all([...sessions.map((session) => tx.store.add(session)), tx.done])
   },
 
   saveStagingFiles: (files) => putFiles('filesStaging', files),
 
-  /** 图片位于会话 JSON 之后；全部读完后回填具体 MIME，保留归档给出的 isImage 标识。 */
-  updateStagingFileTypes: async (types) => {
+  /** 回填 MIME，保留归档中的 isImage 标识；只读写引用到这些原件的会话。 */
+  updateStagingFileTypes: async (types, sessionIds) => {
+    if (sessionIds.size === 0) {
+      return
+    }
     const tx = (await getDB()).transaction('sessionsStaging', 'readwrite')
     await Promise.all([
       (async () => {
-        for (let cursor = await tx.store.openCursor(); cursor; cursor = await cursor.continue()) {
-          const session = cursor.value
-          let changed = false
-          for (const message of session.messages) {
-            if (message.role !== 'user') {
+        try {
+          for (const id of sessionIds) {
+            const session = await tx.store.get(id)
+            if (!session) {
               continue
             }
-            for (const file of message.files) {
-              const type = types.get(file.id) ?? ''
-              if (file.mimeType !== type) {
-                file.mimeType = type
-                changed = true
+            let changed = false
+            for (const message of session.messages) {
+              if (message.role !== 'user') {
+                continue
+              }
+              for (const file of message.files) {
+                const type = types.get(file.id) ?? ''
+                if (file.mimeType !== type) {
+                  file.mimeType = type
+                  changed = true
+                }
               }
             }
+            if (changed) {
+              await tx.store.put(session)
+            }
           }
-          if (changed) {
-            await cursor.update(session)
-          }
+        } catch (error) {
+          abortTransaction(tx)
+          throw error
         }
       })(),
       tx.done,

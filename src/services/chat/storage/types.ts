@@ -20,8 +20,16 @@ export type Storage = {
   saveFiles(files: StoredFile[]): Promise<void>
   loadFile(id: string): Promise<Blob | undefined>
   clearStaging(): Promise<void>
-  addStagingSession(session: Session): Promise<void>
+  /** 批量写入导入暂存的会话；空数组不发起事务。 */
+  addStagingSessions(sessions: Session[]): Promise<void>
   saveStagingFiles(files: StoredFile[]): Promise<void>
-  updateStagingFileTypes(types: ReadonlyMap<string, string>): Promise<void>
+  /**
+   * 回填附件 MIME，保留归档中的 isImage 标识。
+   * sessionIds 是引用到这些原件的暂存会话，实现可以据此只改相关行。
+   */
+  updateStagingFileTypes(
+    types: ReadonlyMap<string, string>,
+    sessionIds: ReadonlySet<string>
+  ): Promise<void>
   commitStaging(): Promise<SessionSummary[]>
 }

@@ -5,7 +5,7 @@
  */
 export type { StoredFile } from './storage/types.js'
 export {
-  addStagingSession,
+  addStagingSessions,
   clearStaging,
   commitStaging,
   deleteSession,
